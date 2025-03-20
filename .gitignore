@@ -51,4 +51,86 @@ coverage/
 # Temp files
 *.log
 *.tmp
-tmp/ 
+tmp/
+
+# 依赖
+.pnp
+.pnp.js
+.yarn/
+
+# 构建输出
+/client/.next/
+/client/out/
+/client/build/
+/server/node-api/dist/
+/server/node-api/build/
+
+# 测试
+/coverage
+.nyc_output
+
+# 环境变量
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 日志
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs
+*.log
+
+# 缓存
+.npm
+.eslintcache
+.vercel
+.next
+.cache
+
+# 上传文件
+/uploads/*
+!/uploads/.gitkeep
+
+# 操作系统相关
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE和编辑器
+.idea/
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-project
+*.sublime-workspace
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.history
+
+# 数据库
+*.sqlite
+*.db
+
+# Docker数据卷
+mongo-data/
+redis-data/
+
+# 临时文件
+temp/
+.tmp/
+.temp/ 

@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # 前端服务
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:5000
+    depends_on:
+      - node-api
+    networks:
+      - resume-helper-network
+
+  # Node.js API服务
+  node-api:
+    build:
+      context: ./server/node-api
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./server/node-api:/app
+      - /app/node_modules
+      - ./uploads:/app/uploads
+    environment:
+      - NODE_ENV=development
+      - MONGODB_URI=mongodb://mongo:27017/resume-helper
+      - PYTHON_API_URL=http://python-api:8000
+      - CORS_ORIGIN=http://localhost:3000
+    depends_on:
+      - mongo
+      - python-api
+    networks:
+      - resume-helper-network
+
+  # Python API服务
+  python-api:
+    build:
+      context: ./server/python-api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./server/python-api:/app
+      - ./uploads:/app/uploads
+    environment:
+      - DEBUG=True
+      - NODE_API_URL=http://node-api:5000
+      - CORS_ORIGINS=http://localhost:3000
+    networks:
+      - resume-helper-network
+
+  # MongoDB数据库
+  mongo:
+    image: mongo:6
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - resume-helper-network
+
+volumes:
+  mongo-data:
+
+
+networks:
+  resume-helper-network:
+    driver: bridge
