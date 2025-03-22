@@ -19,7 +19,7 @@ def get_job_match_service():
 @router.get("/search")
 async def search_jobs(
     query: str = Query(..., description="搜索关键词"),
-    location: Optional[str] = Query(None, description="位置"),
+    location: Optional[str] = Query(None, description="位置"),iy
     page: int = Query(1, description="页码", ge=1),
     limit: int = Query(20, description="每页结果数", ge=1, le=100),
     job_search_service: JobSearchService = Depends(get_job_search_service)
