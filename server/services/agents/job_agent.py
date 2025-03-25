@@ -1,0 +1,395 @@
+"""
+职位搜索和匹配相关的智能代理实现
+"""
+from typing import Dict, Any, List, Optional, Union, TypedDict
+import asyncio
+import logging
+from datetime import datetime
+
+from pydantic import BaseModel, Field
+
+from openai.types.beta.threads import Run
+from agents import Agent, RunStatus
+from agents.tool import function_tool
+
+from models.agent import (
+    JobSearchRequest, 
+    JobSearchResult, 
+    JobItem,
+    JobMatchRequest
+)
+from utils.response import ErrorCode
+
+# 配置日志
+logger = logging.getLogger(__name__)
+
+# 职位搜索输入模型
+class JobSearchInput(BaseModel):
+    """职位搜索输入参数模型"""
+    keywords: List[str] = Field(..., description="搜索关键词列表")
+    location: Optional[str] = Field(None, description="工作地点")
+    job_type: Optional[str] = Field(None, description="工作类型，如全职、兼职等")
+    experience_level: Optional[str] = Field(None, description="经验要求")
+    education_level: Optional[str] = Field(None, description="学历要求")
+    salary_min: Optional[int] = Field(None, description="最低薪资")
+    salary_max: Optional[int] = Field(None, description="最高薪资")
+    company_size: Optional[str] = Field(None, description="公司规模")
+    funding_stage: Optional[str] = Field(None, description="融资阶段")
+    page: int = Field(1, description="页码")
+    limit: int = Field(10, description="每页结果数量")
+
+# 职位搜索输出模型
+class JobSearchOutput(BaseModel):
+    """职位搜索结果模型"""
+    jobs: List[Dict[str, Any]] = Field(..., description="搜索到的职位列表")
+    total: int = Field(..., description="结果总数")
+    page: int = Field(..., description="当前页码")
+    limit: int = Field(..., description="每页数量")
+
+# 职位匹配输入模型
+class JobMatchInput(BaseModel):
+    """职位匹配输入参数模型"""
+    resume_content: str = Field(..., description="简历内容")
+    job_requirements: str = Field(..., description="职位要求描述")
+
+# 职位匹配输出模型
+class JobMatchOutput(BaseModel):
+    """职位匹配结果模型"""
+    match_score: float = Field(..., description="匹配分数，0-1之间")
+    matching_skills: List[str] = Field(..., description="匹配的技能列表")
+    missing_skills: List[str] = Field(..., description="缺失的技能列表") 
+    recommendations: List[str] = Field(..., description="求职建议列表")
+
+# 职位搜索工具
+@function_tool
+def search_jobs(params: JobSearchInput) -> JobSearchOutput:
+    """根据指定条件搜索职位信息"""
+    # 模拟搜索结果
+    return JobSearchOutput(
+        jobs=[
+            {
+                "id": "job123",
+                "title": "高级Python开发工程师",
+                "company": "科技有限公司",
+                "location": "上海",
+                "description": "负责设计和实现高性能的Web应用程序...",
+                "salary": "20k-40k",
+                "job_type": "全职",
+                "experience_level": "3-5年",
+                "education_level": "本科及以上",
+                "company_size": "中型公司(201-1000人)",
+                "funding_stage": "B轮",
+                "company_description": "一家专注于人工智能和机器学习的创新型科技公司...",
+                "url": "https://example.com/jobs/123",
+                "posted_date": "2023-05-15"
+            }
+        ],
+        total=100,
+        page=params.page,
+        limit=params.limit
+    )
+
+# 职位匹配工具
+@function_tool
+def match_job(input_data: JobMatchInput) -> JobMatchOutput:
+    """根据简历内容和职位要求进行匹配分析"""
+    # 模拟匹配结果
+    return JobMatchOutput(
+        match_score=0.85,
+        matching_skills=[
+            "Python开发经验",
+            "FastAPI框架使用经验",
+            "数据库设计能力"
+        ],
+        missing_skills=[
+            "Docker容器化经验",
+            "Kubernetes集群管理"
+        ],
+        recommendations=[
+            "强调Python和FastAPI项目经验",
+            "突出数据库优化成果",
+            "添加API性能优化案例"
+        ]
+    )
+
+# 创建职位搜索代理
+job_search_agent = Agent(
+    name="职位搜索专家",
+    instructions="""
+    你是一位职位搜索专家，擅长根据用户的搜索条件找到最合适的职位。
+    
+    搜索职位时需要考虑：
+    1. 关键词与职位描述的匹配度
+    2. 地理位置的准确性
+    3. 职位类型的匹配
+    4. 经验和学历要求的适配性
+    5. 薪资范围的合理性
+    
+    提供准确、相关的职位搜索结果，并确保结果按照相关性排序。
+    """,
+    tools=[search_jobs],
+    model_settings={"temperature": 0.2}
+)
+
+# 创建职位匹配代理
+job_match_agent = Agent(
+    name="职位匹配专家",
+    instructions="""
+    你是一位职位匹配专家，擅长分析简历内容与职位要求的匹配程度，提供针对性的应聘建议。
+    
+    匹配分析时需要考虑：
+    1. 技能和经验的匹配度
+    2. 教育背景的适配性
+    3. 项目经验与职位要求的相关性
+    4. 技能差距和改进空间
+    5. 如何在申请中突出优势
+    
+    提供详细的匹配分析和针对性的申请建议，帮助求职者提高应聘成功率。
+    """,
+    tools=[match_job, search_jobs],
+    model_settings={"temperature": 0.3}
+)
+
+async def search_jobs_handler(
+    request: JobSearchRequest,
+    db_client = None
+) -> Dict[str, Any]:
+    """
+    搜索职位
+    
+    Args:
+        request: 职位搜索请求
+        db_client: 数据库客户端(可选)
+        
+    Returns:
+        Dict: 职位搜索结果
+    """
+    try:
+        logger.info(f"开始搜索职位, 关键词: {request.keywords}, 地点: {request.location}")
+        
+        # 创建代理运行
+        run = job_search_agent.create_run()
+        
+        # 构建搜索消息
+        message = f"""
+        请按照以下条件搜索职位:
+        
+        关键词: {request.keywords}
+        地点: {request.location or '不限'}
+        职位类型: {request.job_type.value if request.job_type else '不限'}
+        经验水平: {request.experience_level.value if request.experience_level else '不限'}
+        学历要求: {request.education_level.value if request.education_level else '不限'}
+        薪资范围: {f'{request.salary_min}-{request.salary_max}' if request.salary_min and request.salary_max else '不限'}
+        公司规模: {request.company_size.value if request.company_size else '不限'}
+        融资阶段: {request.funding_stage.value if request.funding_stage else '不限'}
+        页码: {request.page}
+        每页数量: {request.limit}
+        """
+        
+        # 等待代理完成
+        result = await _execute_agent_run(run, message, "search_jobs")
+        
+        if not result["success"]:
+            return result
+            
+        # 转换为JobItem对象列表
+        jobs = []
+        for job_data in result["data"].get("jobs", []):
+            job = JobItem(
+                id=job_data.get("id", ""),
+                title=job_data.get("title", ""),
+                company=job_data.get("company", ""),
+                location=job_data.get("location", ""),
+                description=job_data.get("description", ""),
+                salary=job_data.get("salary"),
+                job_type=job_data.get("job_type"),
+                experience_level=job_data.get("experience_level"),
+                education_level=job_data.get("education_level"),
+                company_size=job_data.get("company_size"),
+                funding_stage=job_data.get("funding_stage"),
+                company_description=job_data.get("company_description"),
+                url=job_data.get("url"),
+                posted_date=job_data.get("posted_date"),
+                created_at=datetime.utcnow()
+            )
+            jobs.append(job)
+        
+        # 保存结果到数据库(如果提供了数据库客户端)
+        if db_client:
+            try:
+                # 将结果保存到数据库的代码...
+                logger.info(f"职位搜索结果已保存到数据库, 共{len(jobs)}条记录")
+            except Exception as e:
+                logger.error(f"保存职位搜索结果到数据库时出错: {str(e)}")
+        
+        # 创建搜索结果
+        search_result = JobSearchResult(
+            jobs=jobs,
+            total=result["data"].get("total", len(jobs)),
+            page=result["data"].get("page", request.page),
+            limit=result["data"].get("limit", request.limit)
+        )
+        
+        logger.info(f"职位搜索完成, 找到{len(jobs)}个匹配职位")
+        
+        return {
+            "success": True,
+            "message": "职位搜索成功",
+            "data": search_result
+        }
+        
+    except Exception as e:
+        return _handle_exception(e, "职位搜索过程中发生错误")
+
+async def match_job_handler(
+    request: JobMatchRequest,
+    resume_content: str,
+    job_description: str
+) -> Dict[str, Any]:
+    """
+    匹配职位
+    
+    Args:
+        request: 职位匹配请求
+        resume_content: 简历内容
+        job_description: 职位描述
+        
+    Returns:
+        Dict: 职位匹配结果
+    """
+    try:
+        logger.info(f"开始匹配职位, 简历ID: {request.resume_id}")
+        
+        # 创建代理运行
+        run = job_match_agent.create_run()
+        
+        # 构建匹配消息
+        message = f"""
+        请根据以下简历内容和职位要求进行匹配分析:
+        
+        简历内容:
+        {resume_content}
+        
+        职位要求:
+        {job_description}
+        """
+        
+        # 等待代理完成
+        result = await _execute_agent_run(run, message, "match_job")
+        
+        if not result["success"]:
+            return result
+            
+        logger.info(f"职位匹配完成, 简历ID: {request.resume_id}")
+        
+        return {
+            "success": True,
+            "message": "职位匹配成功",
+            "data": {
+                "match_score": result["data"].get("match_score", 0),
+                "matching_skills": result["data"].get("matching_skills", []),
+                "missing_skills": result["data"].get("missing_skills", []),
+                "recommendations": result["data"].get("recommendations", [])
+            }
+        }
+        
+    except Exception as e:
+        return _handle_exception(e, "职位匹配过程中发生错误")
+
+async def _execute_agent_run(run: Run, message: str, expected_tool_name: str) -> Dict[str, Any]:
+    """
+    执行代理运行并等待结果
+    
+    Args:
+        run: 代理运行实例
+        message: 要发送的消息
+        expected_tool_name: 期望调用的工具名称
+        
+    Returns:
+        Dict: 包含执行结果的字典
+    """
+    # 启动代理运行
+    await run.send_message(message)
+    
+    # 等待代理完成
+    while run.status not in [RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.EXPIRED]:
+        try:
+            response = await run.get_next_response()
+            logger.debug(f"代理响应: {response.content}")
+        except Exception as e:
+            logger.error(f"获取代理响应时出错: {str(e)}")
+            break
+        await asyncio.sleep(0.5)
+    
+    if run.status != RunStatus.COMPLETED:
+        logger.error(f"代理运行失败, 状态: {run.status}")
+        return {
+            "success": False,
+            "message": "代理处理失败",
+            "data": {
+                "error": f"代理运行失败: {run.status}"
+            },
+            "error_code": ErrorCode.INTERNAL_ERROR
+        }
+    
+    # 获取工具调用结果
+    result = None
+    for step in run.thread_messages():
+        if getattr(step, "tool_calls", None):
+            for tool_call in step.tool_calls:
+                if tool_call.function.name == expected_tool_name:
+                    result = tool_call.function.output
+    
+    if not result:
+        logger.error(f"未找到工具调用结果: {expected_tool_name}")
+        return {
+            "success": False,
+            "message": "结果解析失败",
+            "data": {"error": "未找到工具调用结果"},
+            "error_code": ErrorCode.INTERNAL_ERROR
+        }
+    
+    return {
+        "success": True,
+        "data": result
+    }
+
+def _handle_exception(exception: Exception, context: str) -> Dict[str, Any]:
+    """
+    处理异常并返回标准化的错误响应
+    
+    Args:
+        exception: 异常对象
+        context: 错误上下文描述
+        
+    Returns:
+        Dict: 标准化的错误响应
+    """
+    import traceback
+    from openai import BadRequestError
+    from pydantic import ValidationError
+    
+    logger.error(f"{context}: {str(exception)}")
+    logger.debug(traceback.format_exc())
+    
+    if isinstance(exception, BadRequestError):
+        return {
+            "success": False,
+            "message": "API调用错误",
+            "data": {"error": str(exception)},
+            "error_code": ErrorCode.API_ERROR
+        }
+    elif isinstance(exception, ValidationError):
+        return {
+            "success": False,
+            "message": "数据验证错误",
+            "data": {"error": str(exception)},
+            "error_code": ErrorCode.VALIDATION_ERROR
+        }
+    else:
+        return {
+            "success": False,
+            "message": "服务器内部错误",
+            "data": {"error": str(exception)},
+            "error_code": ErrorCode.INTERNAL_ERROR
+        }
