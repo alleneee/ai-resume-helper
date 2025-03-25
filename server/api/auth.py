@@ -11,7 +11,8 @@ import logging
 from models.database import get_mongo_db
 from models.user import UserCreate, UserLogin, UserResponse, UserModel
 from middleware.auth import AuthMiddleware
-from utils.response import ApiResponse, ResponseModel
+from utils.response import ApiResponse, ResponseModel, ErrorCode, ErrorDetail
+from utils.request_id import get_request_id
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -23,31 +24,41 @@ router = APIRouter(tags=["认证"], prefix="/auth")
     response_model=ResponseModel,
     status_code=status.HTTP_201_CREATED,
     summary="用户注册",
-    description="创建新用户账户并返回用户信息和认证令牌"
+    description="创建新用户账户并返回用户信息和认证令牌",
+    responses={
+        201: {"description": "用户注册成功"},
+        409: {"description": "邮箱已被注册"},
+        400: {"description": "请求参数无效"}
+    }
 )
 async def register(
     user_data: Annotated[UserCreate, Body(...)],
-    db: Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)]
+    db: Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)],
+    request_id: str = Depends(get_request_id)
 ):
     """
-    用户注册
+    用户注册接口
     
-    - **user_data**: 用户注册信息，包含邮箱、密码等
-    - 返回：用户信息和JWT令牌
+    Args:
+        user_data: 用户注册信息，包含邮箱、密码等
+        db: MongoDB数据库连接
+        request_id: 请求ID
     
-    可能的错误：
-    - 409: 邮箱已被注册
+    Returns:
+        JSONResponse: 包含用户信息和JWT令牌的响应
     """
+    logger.info(f"处理用户注册请求: {user_data.email} - 请求ID: {request_id}")
+    
     try:
-        logger.info(f"处理用户注册请求: {user_data.email}")
-        
         # 检查邮箱是否已存在
         existing_user = await db.users.find_one({"email": user_data.email})
         if existing_user:
-            logger.warning(f"注册失败: 邮箱已存在 {user_data.email}")
-            raise HTTPException(
+            logger.warning(f"注册失败: 邮箱已存在 {user_data.email} - 请求ID: {request_id}")
+            return ApiResponse.error(
+                message="此邮箱已被注册",
+                error_code=ErrorCode.RESOURCE_CONFLICT,
                 status_code=status.HTTP_409_CONFLICT,
-                detail="此邮箱已被注册"
+                request_id=request_id
             )
         
         # 创建新用户
@@ -64,10 +75,10 @@ async def register(
         # 查询新创建的用户
         created_user = await db.users.find_one({"_id": result.inserted_id})
         if not created_user:
-            logger.error(f"用户创建后无法检索: {result.inserted_id}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="用户创建失败"
+            logger.error(f"用户创建后无法检索: {result.inserted_id} - 请求ID: {request_id}")
+            return ApiResponse.server_error(
+                message="用户创建失败", 
+                request_id=request_id
             )
         
         # 创建令牌
@@ -77,7 +88,7 @@ async def register(
         if "password_hash" in created_user:
             del created_user["password_hash"]
         
-        logger.info(f"用户注册成功: {user_data.email}")
+        logger.info(f"用户注册成功: {user_data.email} - 请求ID: {request_id}")
         
         # 返回用户信息和令牌
         return ApiResponse.success(
@@ -85,16 +96,16 @@ async def register(
             data={
                 "user": created_user,
                 "token": token
-            }
+            },
+            status_code=status.HTTP_201_CREATED,
+            request_id=request_id
         )
-    except HTTPException:
-        # 重新抛出HTTP异常
-        raise
     except Exception as e:
-        logger.error(f"用户注册过程中发生错误: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"注册过程中发生错误: {str(e)}"
+        logger.exception(f"用户注册过程中发生错误: {str(e)} - 请求ID: {request_id}")
+        return ApiResponse.server_error(
+            message="注册过程中发生错误",
+            exc=e,
+            request_id=request_id
         )
 
 @router.post(
@@ -102,41 +113,53 @@ async def register(
     response_model=ResponseModel,
     status_code=status.HTTP_200_OK,
     summary="用户登录",
-    description="验证用户凭据并返回认证令牌"
+    description="验证用户凭据并返回认证令牌",
+    responses={
+        200: {"description": "登录成功"},
+        401: {"description": "邮箱或密码不正确"},
+        400: {"description": "请求参数无效"}
+    }
 )
 async def login(
     login_data: Annotated[UserLogin, Body(...)],
-    db: Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)]
+    db: Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)],
+    request_id: str = Depends(get_request_id)
 ):
     """
-    用户登录
+    用户登录接口
     
-    - **login_data**: 用户登录信息，包含邮箱和密码
-    - 返回：用户信息和JWT令牌
+    Args:
+        login_data: 用户登录信息，包含邮箱和密码
+        db: MongoDB数据库连接
+        request_id: 请求ID
     
-    可能的错误：
-    - 401: 邮箱或密码不正确
+    Returns:
+        JSONResponse: 包含用户信息和JWT令牌的响应
     """
+    logger.info(f"处理用户登录请求: {login_data.email} - 请求ID: {request_id}")
+    
     try:
-        logger.info(f"处理用户登录请求: {login_data.email}")
-        
         # 查找用户
         user = await db.users.find_one({"email": login_data.email})
         if not user:
-            logger.warning(f"登录失败: 用户不存在 {login_data.email}")
-            raise HTTPException(
+            logger.warning(f"登录失败: 用户不存在 {login_data.email} - 请求ID: {request_id}")
+            return ApiResponse.error(
+                message="邮箱或密码不正确",
+                error_code=ErrorCode.UNAUTHORIZED,
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="邮箱或密码不正确"
+                request_id=request_id
             )
         
         # 验证密码
         user_model = UserModel(**user)
         is_valid = await user_model.compare_password(login_data.password)
         if not is_valid:
-            logger.warning(f"登录失败: 密码错误 {login_data.email}")
-            raise HTTPException(
+            logger.warning(f"登录失败: 密码错误 {login_data.email} - 请求ID: {request_id}")
+            return ApiResponse.error(
+                message="邮箱或密码不正确",
+                error_code=ErrorCode.UNAUTHORIZED,
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="邮箱或密码不正确"
+                request_id=request_id
             )
         
         # 更新最后登录时间
@@ -152,7 +175,7 @@ async def login(
         if "password_hash" in user:
             del user["password_hash"]
         
-        logger.info(f"用户登录成功: {login_data.email}")
+        logger.info(f"用户登录成功: {login_data.email} - 请求ID: {request_id}")
         
         # 返回用户信息和令牌
         return ApiResponse.success(
@@ -160,16 +183,15 @@ async def login(
             data={
                 "user": user,
                 "token": token
-            }
+            },
+            request_id=request_id
         )
-    except HTTPException:
-        # 重新抛出HTTP异常
-        raise
     except Exception as e:
-        logger.error(f"用户登录过程中发生错误: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"登录过程中发生错误: {str(e)}"
+        logger.exception(f"用户登录过程中发生错误: {str(e)} - 请求ID: {request_id}")
+        return ApiResponse.server_error(
+            message="登录过程中发生错误",
+            exc=e,
+            request_id=request_id
         )
 
 @router.get(
@@ -177,34 +199,42 @@ async def login(
     response_model=ResponseModel,
     status_code=status.HTTP_200_OK,
     summary="获取当前用户信息",
-    description="返回当前登录用户的详细信息"
+    description="返回当前登录用户的详细信息",
+    responses={
+        200: {"description": "获取用户信息成功"},
+        401: {"description": "未认证或令牌无效"},
+    }
 )
 async def get_current_user_info(
-    current_user: Annotated[Dict[str, Any], Depends(AuthMiddleware.get_current_user)]
+    current_user: Annotated[Dict[str, Any], Depends(AuthMiddleware.get_current_user)],
+    request_id: str = Depends(get_request_id)
 ):
     """
-    获取当前用户信息
+    获取当前用户信息接口
     
-    - 需要认证令牌
-    - 返回：当前登录用户的详细信息
+    Args:
+        current_user: 当前用户信息，通过认证中间件获取
+        request_id: 请求ID
     
-    可能的错误：
-    - 401: 未认证或令牌无效
+    Returns:
+        JSONResponse: 包含用户详细信息的响应
     """
+    logger.info(f"获取当前用户信息: {current_user.get('email')} - 请求ID: {request_id}")
+    
     try:
-        logger.info(f"获取当前用户信息: {current_user.get('email')}")
-        
         # 删除敏感信息
         if "password_hash" in current_user:
             del current_user["password_hash"]
         
         return ApiResponse.success(
             message="获取用户信息成功",
-            data=current_user
+            data=current_user,
+            request_id=request_id
         )
     except Exception as e:
-        logger.error(f"获取用户信息过程中发生错误: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取用户信息失败: {str(e)}"
+        logger.exception(f"获取用户信息过程中发生错误: {str(e)} - 请求ID: {request_id}")
+        return ApiResponse.server_error(
+            message="获取用户信息失败",
+            exc=e,
+            request_id=request_id
         )

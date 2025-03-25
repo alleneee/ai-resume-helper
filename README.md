@@ -26,6 +26,7 @@
 - Pydantic v2
 - MongoDB (使用Motor异步驱动)
 - JWT认证
+- Firecrawl API: 高效网页爬取和内容提取
 
 ### AI/ML
 
@@ -67,6 +68,7 @@ ai-resume-helper/
 - Python 3.9+
 - MongoDB
 - OpenAI API密钥
+- Firecrawl API密钥
 
 ### 安装步骤
 
@@ -84,7 +86,7 @@ cd server
 pip install -r requirements.txt
 ```
 
-3. 配置环境变量
+3\. 配置环境变量
 
 创建`.env`文件并设置以下变量：
 
@@ -96,22 +98,38 @@ ACCESS_TOKEN_EXPIRE_MINUTES=30
 AI_API_KEY=your_openai_api_key
 AI_MODEL=gpt-4
 JOB_SEARCH_API_KEY=your_job_search_api_key
+FIRECRAWL_API_KEY=fc-your_firecrawl_api_key  # 用于网页爬取的Firecrawl API密钥
 ```
 
-4. 启动后端服务
+4\. 启动后端服务
 
 ```bash
 cd server
 uvicorn main:app --reload --port 8000
 ```
 
-5. 安装并启动前端（可选）
+5\. 安装并启动前端（可选）
 
 ```bash
 cd client
 npm install
 npm run dev
 ```
+
+## 获取API密钥
+
+### OpenAI API密钥
+
+1. 访问 [OpenAI平台](https://platform.openai.com/)
+2. 注册或登录账号
+3. 在API部分创建新的API密钥
+
+### Firecrawl API密钥
+
+1. 访问 [Firecrawl官网](https://firecrawl.dev)
+2. 注册或登录账号
+3. 在开发者控制台创建新的API密钥
+4. 密钥格式应为"fc-"开头
 
 ## API文档
 
@@ -152,6 +170,7 @@ npm run dev
 - **JWT认证**：安全的基于令牌的认证
 - **异常处理**：全局异常处理和详细错误信息
 - **OpenAPI文档**：自动生成的API文档
+- **Firecrawl集成**：高效网页爬取和内容提取
 
 ## 贡献指南
 
