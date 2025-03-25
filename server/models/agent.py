@@ -723,3 +723,80 @@ class AgentResponse(BaseAPIModel, Generic[T]):
 
 # 为兼容性提供别名
 JobSearchResponse = JobSearchResult
+
+class JobDetail(BaseAPIModel):
+    """职位详情模型"""
+    title: ClassVar[str] = "职位详情"
+    description: ClassVar[str] = "表示单个职位的详细信息模型"
+    
+    id: str = Field(..., description="职位ID")
+    title: Optional[str] = Field(None, description="职位标题")
+    company_name: Optional[str] = Field(None, description="公司名称")
+    location: Optional[str] = Field(None, description="工作地点")
+    salary_range: Optional[str] = Field(None, description="薪资范围")
+    job_type: Optional[str] = Field(None, description="工作类型")
+    experience_level: Optional[str] = Field(None, description="经验要求")
+    education_level: Optional[str] = Field(None, description="学历要求")
+    company_size: Optional[str] = Field(None, description="公司规模")
+    funding_stage: Optional[str] = Field(None, description="融资阶段")
+    company_description: Optional[str] = Field(None, description="公司描述")
+    job_description: Optional[str] = Field(None, description="职位描述")
+    responsibilities: Optional[List[str]] = Field(None, description="工作职责")
+    requirements: Optional[List[str]] = Field(None, description="岗位要求")
+    benefits: Optional[List[str]] = Field(None, description="福利待遇")
+    url: Optional[str] = Field(
+        None, 
+        description="职位链接", 
+        pattern=r'^https?://'
+    )
+    posted_date: Optional[str] = Field(None, description="发布日期")
+    
+    model_config = ConfigDict(
+        title="职位详情",
+        json_encoders={
+            datetime: lambda v: v.isoformat()
+        },
+        json_schema_extra={
+            "example": {
+                "id": "job123",
+                "title": "高级Python开发工程师",
+                "company_name": "科技有限公司",
+                "location": "上海",
+                "salary_range": "20k-40k",
+                "job_type": "全职",
+                "experience_level": "3-5年",
+                "education_level": "本科及以上",
+                "company_size": "中型公司(201-1000人)",
+                "funding_stage": "B轮",
+                "company_description": "一家专注于人工智能和机器学习的创新型科技公司...",
+                "job_description": "负责设计和实现高性能的Web应用程序...",
+                "responsibilities": [
+                    "设计和开发高可扩展的Web应用",
+                    "优化系统性能",
+                    "参与代码审查和技术决策"
+                ],
+                "requirements": [
+                    "熟练掌握Python编程",
+                    "熟悉FastAPI、Django或Flask框架",
+                    "具有良好的算法和数据结构基础"
+                ],
+                "benefits": [
+                    "有竞争力的薪资",
+                    "五险一金",
+                    "弹性工作制",
+                    "定期技术培训"
+                ],
+                "url": "https://example.com/jobs/123",
+                "posted_date": "2023-05-15"
+            }
+        }
+    )
+    
+    @field_validator('url')
+    def validate_url(cls, v: Optional[str]) -> Optional[str]:
+        """验证URL格式"""
+        if v is None:
+            return v
+        if not v.startswith(('http://', 'https://')):
+            raise ValueError("URL必须以http://或https://开头")
+        return v

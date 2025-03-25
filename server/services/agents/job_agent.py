@@ -1,24 +1,48 @@
 """
 职位搜索和匹配相关的智能代理实现
 """
-from typing import Dict, Any, List, Optional, Union, TypedDict
-import asyncio
+from ast import main
+import os
+import uuid
+import json
 import logging
+import asyncio
+from typing import Dict, Any, List, Optional, Union, TypedDict
 from datetime import datetime
-
+from server.database.mongodb import get_db
 from pydantic import BaseModel, Field
-
 from openai.types.beta.threads import Run
-from agents import Agent, RunStatus
+from agents import Agent as OpenAIAgent, RunStatus
 from agents.tool import function_tool
 
-from models.agent import (
+# 导入browser-use相关模块
+from browser_use import Agent as BrowserAgent
+from browser_use.browser.browser import Browser, BrowserConfig
+from browser_use.controller.service import Controller
+from langchain_openai import ChatOpenAI
+
+from server.models.agent import (
     JobSearchRequest, 
-    JobSearchResult, 
-    JobItem,
-    JobMatchRequest
+    JobSearchResponse,
+    JobMatchRequest, 
+    JobMatchResponse,
+    ResumeOptimizeRequest, 
+    ResumeOptimizeResponse,
+    JobSearchInput,
+    JobSearchOutput,
+    JobMatchInput,
+    JobMatchOutput,
+    ResumeOptimizeInput,
+    ResumeOptimizeOutput,
+    JobType,
+    ExperienceLevel
 )
-from utils.response import ErrorCode
+
+from langchain.agents import AgentExecutor, create_openai_functions_agent
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.memory import ConversationBufferMemory
+from langchain.tools.base import BaseTool
+from langchain_core.tools import tool as function_tool
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -62,9 +86,132 @@ class JobMatchOutput(BaseModel):
 
 # 职位搜索工具
 @function_tool
-def search_jobs(params: JobSearchInput) -> JobSearchOutput:
+async def search_jobs(params: JobSearchInput) -> JobSearchOutput:
     """根据指定条件搜索职位信息"""
-    # 模拟搜索结果
+    try:
+        # 获取环境变量
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            logger.error("未找到OPENAI_API_KEY环境变量")
+            # 如果没有API密钥，返回模拟数据
+            return _get_mock_job_search_results(params)
+        
+        # 创建语言模型
+        llm = ChatOpenAI(
+            api_key=openai_api_key,
+            model="gpt-3.5-turbo-0125",
+            temperature=0
+        )
+        
+        # 创建浏览器控制器
+        controller = Controller()
+        
+        # 创建浏览器配置
+        browser_config = BrowserConfig(
+            headless=True,  # 生产环境中使用无头模式
+        )
+        
+        # 创建浏览器实例
+        browser = Browser(config=browser_config)
+        
+        # 构建搜索任务
+        location = params.location or "全国"
+        keywords = params.keywords or ""
+        job_type = params.job_type or ""
+        experience_level = params.experience_level or ""
+        
+        # 定义任务 - 根据参数在Boss直聘搜索职位
+        task = f"""
+        访问Boss直聘网站(https://www.zhipin.com)，并执行以下操作：
+        1. 在首页找到城市选择选项，选择"{location}"
+        2. 在搜索框中输入"{keywords}"并搜索
+        3. 如果有筛选选项，尝试设置以下筛选条件：
+           - 工作类型: {job_type}
+           - 经验要求: {experience_level}
+        4. 等待搜索结果加载完成
+        5. 提取前{params.limit or 10}个职位的以下信息：
+           - 职位ID（如果有）
+           - 职位名称
+           - 公司名称
+           - 薪资范围
+           - 工作地点
+           - 经验要求
+           - 学历要求
+           - 公司规模（如果有）
+           - 融资阶段（如果有）
+           - 职位描述摘要
+           - 职位链接
+           - 发布日期
+        6. 将提取的信息整理成结构化的JSON格式返回
+        """
+        
+        try:
+            # 创建浏览器代理
+            browser_agent = BrowserAgent(
+                task=task,
+                llm=llm,
+                controller=controller,
+                browser=browser
+            )
+            
+            # 运行任务
+            logger.info(f"开始搜索职位: 地点={location}, 关键词={keywords}")
+            result = await browser_agent.run()
+            
+            # 解析结果
+            try:
+                import json
+                json_result = json.loads(result)
+                
+                # 将结果转换为JobSearchOutput格式
+                jobs = []
+                for job_data in json_result.get("job_listings", []):
+                    job = {
+                        "id": job_data.get("id", f"job_{uuid.uuid4().hex[:8]}"),
+                        "title": job_data.get("position_name"),
+                        "company": job_data.get("company_name"),
+                        "location": job_data.get("location"),
+                        "description": job_data.get("description", ""),
+                        "salary": job_data.get("salary_range"),
+                        "job_type": job_data.get("job_type", "全职"),
+                        "experience_level": job_data.get("experience_requirement"),
+                        "education_level": job_data.get("education_requirement"),
+                        "company_size": job_data.get("company_size", ""),
+                        "funding_stage": job_data.get("funding_stage", ""),
+                        "company_description": job_data.get("company_description", ""),
+                        "url": job_data.get("url", ""),
+                        "posted_date": job_data.get("posted_date", "")
+                    }
+                    jobs.append(job)
+                
+                # 返回搜索结果
+                return JobSearchOutput(
+                    jobs=jobs,
+                    total=len(jobs),
+                    page=params.page,
+                    limit=params.limit
+                )
+                
+            except Exception as e:
+                logger.error(f"解析职位搜索结果时出错: {str(e)}")
+                return _get_mock_job_search_results(params)
+                
+        except Exception as e:
+            logger.error(f"执行职位搜索任务时出错: {str(e)}")
+            return _get_mock_job_search_results(params)
+            
+    except Exception as e:
+        logger.error(f"职位搜索过程中出错: {str(e)}")
+        return _get_mock_job_search_results(params)
+    finally:
+        # 确保浏览器关闭
+        if 'browser' in locals():
+            await browser.close()
+            logger.info("浏览器已关闭")
+
+def _get_mock_job_search_results(params: JobSearchInput) -> JobSearchOutput:
+    """返回模拟的职位搜索结果"""
+    logger.info("返回模拟的职位搜索结果")
     return JobSearchOutput(
         jobs=[
             {
@@ -113,7 +260,7 @@ def match_job(input_data: JobMatchInput) -> JobMatchOutput:
     )
 
 # 创建职位搜索代理
-job_search_agent = Agent(
+job_search_agent = OpenAIAgent(
     name="职位搜索专家",
     instructions="""
     你是一位职位搜索专家，擅长根据用户的搜索条件找到最合适的职位。
@@ -132,7 +279,7 @@ job_search_agent = Agent(
 )
 
 # 创建职位匹配代理
-job_match_agent = Agent(
+job_match_agent = OpenAIAgent(
     name="职位匹配专家",
     instructions="""
     你是一位职位匹配专家，擅长分析简历内容与职位要求的匹配程度，提供针对性的应聘建议。
@@ -149,6 +296,93 @@ job_match_agent = Agent(
     tools=[match_job, search_jobs],
     model_settings={"temperature": 0.3}
 )
+
+async def handle_job_search(request: JobSearchRequest) -> JobSearchResponse:
+    """处理职位搜索请求"""
+    try:
+        logger.info(f"开始处理职位搜索请求: {request}")
+        
+        # 调用search_jobs函数进行搜索
+        search_input = JobSearchInput(
+            keywords=request.keywords,
+            location=request.location,
+            job_type=request.job_type,
+            experience_level=request.experience_level,
+            education_level=request.education_level,
+            company_size=request.company_size,
+            funding_stage=request.funding_stage,
+            page=request.page,
+            limit=request.limit
+        )
+        
+        # 调用异步搜索函数
+        search_output = await search_jobs(search_input)
+        
+        # 构建响应
+        jobs = search_output.jobs
+        
+        # 保存搜索结果到数据库
+        try:
+
+            db = await get_db()
+            
+            # 准备要保存的数据
+            search_record = {
+                "user_id": request.user_id if hasattr(request, "user_id") else None,
+                "search_params": {
+                    "keywords": request.keywords,
+                    "location": request.location,
+                    "job_type": request.job_type,
+                    "experience_level": request.experience_level,
+                    "education_level": request.education_level,
+                    "company_size": request.company_size,
+                    "funding_stage": request.funding_stage,
+                    "page": request.page,
+                    "limit": request.limit
+                },
+                "results_count": len(jobs),
+                "timestamp": datetime.utcnow(),
+                "jobs": jobs
+            }
+            
+            # 异步保存到MongoDB
+            result = await db.job_searches.insert_one(search_record)
+            logger.info(f"搜索结果已保存到MongoDB，ID: {result.inserted_id}")
+            
+            # 为每个职位创建单独的记录（可选）
+            if jobs:
+                job_records = []
+                for job in jobs:
+                    job_record = {
+                        "search_id": result.inserted_id,
+                        "job_data": job,
+                        "created_at": datetime.utcnow()
+                    }
+                    job_records.append(job_record)
+                
+                if job_records:
+                    await db.jobs.insert_many(job_records)
+                    logger.info(f"已将 {len(job_records)} 个职位保存到MongoDB")
+            
+        except ImportError:
+            logger.error("MongoDB模块未找到，无法保存搜索结果")
+        except Exception as e:
+            logger.error(f"保存职位搜索结果到数据库时出错: {str(e)}")
+        
+        # 创建搜索结果
+        search_result = JobSearchResponse(
+            jobs=jobs,
+            total=search_output.total,
+            page=search_output.page,
+            limit=search_output.limit
+        )
+        
+        logger.info(f"职位搜索完成，找到 {len(jobs)} 个职位")
+        return search_result
+        
+    except Exception as e:
+        logger.error(f"处理职位搜索请求时出错: {str(e)}")
+        raise
 
 async def search_jobs_handler(
     request: JobSearchRequest,
@@ -172,7 +406,7 @@ async def search_jobs_handler(
         
         # 构建搜索消息
         message = f"""
-        请按照以下条件搜索职位:
+        请按照以下条件搜索职位：
         
         关键词: {request.keywords}
         地点: {request.location or '不限'}
@@ -195,35 +429,72 @@ async def search_jobs_handler(
         # 转换为JobItem对象列表
         jobs = []
         for job_data in result["data"].get("jobs", []):
-            job = JobItem(
-                id=job_data.get("id", ""),
-                title=job_data.get("title", ""),
-                company=job_data.get("company", ""),
-                location=job_data.get("location", ""),
-                description=job_data.get("description", ""),
-                salary=job_data.get("salary"),
-                job_type=job_data.get("job_type"),
-                experience_level=job_data.get("experience_level"),
-                education_level=job_data.get("education_level"),
-                company_size=job_data.get("company_size"),
-                funding_stage=job_data.get("funding_stage"),
-                company_description=job_data.get("company_description"),
-                url=job_data.get("url"),
-                posted_date=job_data.get("posted_date"),
-                created_at=datetime.utcnow()
-            )
+            job = {
+                "id": job_data.get("id", ""),
+                "title": job_data.get("title", ""),
+                "company": job_data.get("company", ""),
+                "location": job_data.get("location", ""),
+                "description": job_data.get("description", ""),
+                "salary": job_data.get("salary"),
+                "job_type": job_data.get("job_type"),
+                "experience_level": job_data.get("experience_level"),
+                "education_level": job_data.get("education_level"),
+                "company_size": job_data.get("company_size"),
+                "funding_stage": job_data.get("funding_stage"),
+                "company_description": job_data.get("company_description"),
+                "url": job_data.get("url"),
+                "posted_date": job_data.get("posted_date"),
+                "created_at": datetime.utcnow()
+            }
             jobs.append(job)
         
         # 保存结果到数据库(如果提供了数据库客户端)
         if db_client:
             try:
-                # 将结果保存到数据库的代码...
+                # 准备要保存的数据
+                search_record = {
+                    "user_id": request.user_id if hasattr(request, "user_id") else None,
+                    "search_params": {
+                        "keywords": request.keywords,
+                        "location": request.location,
+                        "job_type": request.job_type,
+                        "experience_level": request.experience_level,
+                        "education_level": request.education_level,
+                        "company_size": request.company_size,
+                        "funding_stage": request.funding_stage,
+                        "page": request.page,
+                        "limit": request.limit
+                    },
+                    "results_count": len(jobs),
+                    "timestamp": datetime.utcnow(),
+                    "jobs": jobs
+                }
+                
+                # 异步保存到MongoDB
+                result = await db_client.job_searches.insert_one(search_record)
+                logger.info(f"搜索结果已保存到MongoDB，ID: {result.inserted_id}")
+                
+                # 为每个职位创建单独的记录
+                if jobs:
+                    job_records = []
+                    for job in jobs:
+                        job_record = {
+                            "search_id": result.inserted_id,
+                            "job_data": job,
+                            "created_at": datetime.utcnow()
+                        }
+                        job_records.append(job_record)
+                    
+                    if job_records:
+                        await db_client.jobs.insert_many(job_records)
+                        logger.info(f"已将 {len(job_records)} 个职位保存到MongoDB")
+                
                 logger.info(f"职位搜索结果已保存到数据库, 共{len(jobs)}条记录")
             except Exception as e:
                 logger.error(f"保存职位搜索结果到数据库时出错: {str(e)}")
         
         # 创建搜索结果
-        search_result = JobSearchResult(
+        search_result = JobSearchResponse(
             jobs=jobs,
             total=result["data"].get("total", len(jobs)),
             page=result["data"].get("page", request.page),
@@ -265,12 +536,12 @@ async def match_job_handler(
         
         # 构建匹配消息
         message = f"""
-        请根据以下简历内容和职位要求进行匹配分析:
+        请根据以下简历内容和职位要求进行匹配分析：
         
-        简历内容:
+        简历内容：
         {resume_content}
         
-        职位要求:
+        职位要求：
         {job_description}
         """
         

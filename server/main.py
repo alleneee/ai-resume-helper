@@ -13,7 +13,7 @@ import uvicorn
 from typing import Dict, Any, List
 
 # 导入API路由
-from api import auth, resume, agent
+from api import auth, resume, agent, agent_v2
 from models.database import close_mongo_connection, connect_to_mongo
 from utils.response import ApiResponse
 
@@ -114,6 +114,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(auth.router, prefix="/api")
 app.include_router(resume.router, prefix="/api")
 app.include_router(agent.router, prefix="/api")
+app.include_router(agent_v2.router, prefix="/api")
 
 # 静态文件服务
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")

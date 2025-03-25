@@ -30,10 +30,21 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = Field("uploads", description="上传目录")
     MAX_UPLOAD_SIZE: int = Field(10485760, description="最大上传大小（字节）")
     
-    # API配置
+    # OpenAI配置
     OPENAI_API_KEY: str = Field("", description="OpenAI API密钥")
-    OPENAI_MODEL: str = Field("gpt-4o", description="OpenAI模型")
+    OPENAI_ORGANIZATION: str = Field("", description="OpenAI 组织ID")
+    OPENAI_MODEL: str = Field("gpt-4o", description="OpenAI基础模型")
     OPENAI_API_BASE_URL: str = Field("https://api.openai.com/v1", description="OpenAI API基础URL")
+    OPENAI_TIMEOUT: int = Field(60, description="OpenAI API超时时间（秒）")
+    OPENAI_MAX_RETRIES: int = Field(3, description="OpenAI API最大重试次数")
+    
+    # OpenAI Agents配置
+    OPENAI_ASSISTANT_MODEL: str = Field("gpt-4o", description="OpenAI助手模型")
+    OPENAI_AGENT_TIMEOUT: int = Field(180, description="OpenAI Agent超时时间（秒）")
+    OPENAI_AGENT_MAX_RETRIES: int = Field(2, description="OpenAI Agent最大重试次数")
+    RESUME_OPTIMIZER_ASSISTANT_ID: str = Field("", description="简历优化助手ID")
+    JOB_SEARCH_ASSISTANT_ID: str = Field("", description="职位搜索助手ID")
+    COVER_LETTER_ASSISTANT_ID: str = Field("", description="求职信生成助手ID")
     
     # 职位搜索API配置
     JOB_SEARCH_API_KEY: str = Field("", description="职位搜索API密钥")
@@ -118,6 +129,30 @@ class Settings(BaseSettings):
             "enabled": self.RATE_LIMIT_ENABLED,
             "window": self.RATE_LIMIT_WINDOW,
             "max": self.RATE_LIMIT_MAX_REQUESTS
+        }
+    
+    @property
+    def openai_settings(self) -> Dict[str, Any]:
+        """OpenAI设置"""
+        return {
+            "api_key": self.OPENAI_API_KEY,
+            "organization": self.OPENAI_ORGANIZATION,
+            "base_url": self.OPENAI_API_BASE_URL,
+            "timeout": self.OPENAI_TIMEOUT,
+            "max_retries": self.OPENAI_MAX_RETRIES,
+            "model": self.OPENAI_MODEL
+        }
+    
+    @property
+    def openai_agents_settings(self) -> Dict[str, Any]:
+        """OpenAI Agents设置"""
+        return {
+            "timeout": self.OPENAI_AGENT_TIMEOUT,
+            "max_retries": self.OPENAI_AGENT_MAX_RETRIES,
+            "model": self.OPENAI_ASSISTANT_MODEL,
+            "resume_optimizer_id": self.RESUME_OPTIMIZER_ASSISTANT_ID,
+            "job_search_id": self.JOB_SEARCH_ASSISTANT_ID,
+            "cover_letter_id": self.COVER_LETTER_ASSISTANT_ID
         }
 
 

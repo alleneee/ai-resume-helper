@@ -2,7 +2,7 @@
 智能代理相关的API路由
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Query, Path, Request
-from typing import Dict, Any, List, Optional, Annotated, Union
+from typing import Dict, Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import logging
 from datetime import datetime
@@ -28,7 +28,8 @@ from models.agent import (
     JobSearchRequest,
     AgentResponse,
     JobSearchResult,
-    JobItem
+    JobItem,
+    JobDetail
 )
 
 # 配置日志
@@ -511,7 +512,7 @@ async def search_jobs_by_title(
 
 @router.get(
     "/job/{job_id}", 
-    response_model=ResponseModel,
+    response_model=JobDetail,
     status_code=status.HTTP_200_OK,
     summary="获取职位详情",
     description="根据职位ID获取详细信息",
@@ -525,7 +526,7 @@ async def get_job_details(
     agent_service: AgentService = Depends(get_agent_service),
     job_id: str = Path(..., description="职位ID"),
     request_id: str = Depends(get_request_id)
-):
+) -> JobDetail:
     """
     获取职位详情
     
@@ -536,7 +537,7 @@ async def get_job_details(
         request_id: 请求ID
         
     Returns:
-        JSONResponse: 职位详情
+        JobDetail: 职位详情Pydantic模型
     """
     logger.info(f"处理获取职位详情请求: 用户: {current_user.get('email')} - 职位ID: {job_id} - 请求ID: {request_id}")
     
@@ -546,30 +547,17 @@ async def get_job_details(
         
         if not job:
             logger.warning(f"职位不存在: {job_id} - 请求ID: {request_id}")
-            return ApiResponse.not_found(
-                message="职位不存在",
-                resource="职位",
-                request_id=request_id
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="职位不存在"
             )
-        
-        logger.info(f"获取职位详情成功: 职位ID: {job_id} - 请求ID: {request_id}")
-        return ApiResponse.success(
-            message="获取职位成功",
-            data=job.model_dump(),
-            request_id=request_id
-        )
-    
+            
+        return job
     except Exception as e:
-        logger.exception(f"获取职位详情失败: {str(e)} - 请求ID: {request_id}")
-        if "API请求失败" in str(e) or "超过调用限制" in str(e):
-            return ApiResponse.ai_service_error(
-                message=f"职位搜索服务调用失败: {str(e)}",
-                request_id=request_id
-            )
-        return ApiResponse.server_error(
-            message="获取职位详情失败",
-            exc=e,
-            request_id=request_id
+        logger.error(f"获取职位详情失败: {str(e)} - 请求ID: {request_id}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取职位详情失败"
         )
 
 @router.post(
