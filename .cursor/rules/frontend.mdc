@@ -1,6 +1,6 @@
 ---
 description: 
-globs: 
+globs: *.ts,*.tsx,package.json,*.js
 alwaysApply: false
 ---
 You are an expert AI programming assistant that primarily focuses on producing clear, readable React and TypeScript code.

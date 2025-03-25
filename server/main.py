@@ -1,0 +1,135 @@
+"""
+主应用程序入口
+"""
+import os
+import logging
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
+import uvicorn
+from typing import Dict, Any, List
+
+# 导入API路由
+from api import auth, resume, agent
+from models.database import close_mongo_connection, connect_to_mongo
+from utils.response import ApiResponse
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("app.log")
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# 应用程序生命周期管理
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    应用程序生命周期管理
+    
+    在应用程序启动时连接数据库，在应用程序关闭时断开连接
+    """
+    # 启动时执行
+    logger.info("应用程序启动中...")
+    
+    # 连接到MongoDB
+    await connect_to_mongo()
+    logger.info("已连接到MongoDB")
+    
+    # 创建上传目录
+    upload_dir = os.path.join(os.getcwd(), "uploads")
+    if not os.path.exists(upload_dir):
+        os.makedirs(upload_dir)
+        logger.info(f"已创建上传目录: {upload_dir}")
+    
+    yield
+    
+    # 关闭时执行
+    logger.info("应用程序关闭中...")
+    
+    # 关闭MongoDB连接
+    await close_mongo_connection()
+    logger.info("已关闭MongoDB连接")
+
+# 创建FastAPI应用程序
+app = FastAPI(
+    title="AI简历助手API",
+    description="AI驱动的简历优化和职位匹配系统",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json"
+)
+
+# 配置CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 在生产环境中应该指定具体的域名
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 全局异常处理
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """处理请求验证错误"""
+    errors = []
+    for error in exc.errors():
+        errors.append({
+            "loc": error["loc"],
+            "msg": error["msg"],
+            "type": error["type"]
+        })
+    
+    logger.warning(f"请求验证错误: {errors}")
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content=ApiResponse.validation_error(
+            message="请求参数验证失败",
+            data={"errors": errors}
+        ).dict()
+    )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """处理全局异常"""
+    logger.error(f"全局异常: {str(exc)}", exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=ApiResponse.error(
+            message=f"服务器内部错误: {str(exc)}"
+        ).dict()
+    )
+
+# 注册路由
+app.include_router(auth.router, prefix="/api")
+app.include_router(resume.router, prefix="/api")
+app.include_router(agent.router, prefix="/api")
+
+# 静态文件服务
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+# 健康检查端点
+@app.get("/api/health", tags=["健康检查"])
+async def health_check():
+    """健康检查端点"""
+    return {"status": "healthy", "version": app.version}
+
+# 主入口
+if __name__ == "__main__":
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )
