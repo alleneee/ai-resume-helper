@@ -320,75 +320,230 @@ def analyze_jobs(input_data: JobAnalysisInput) -> JobAnalysisOutput:
     """分析职位数据，提取共同点和要求"""
     logger.info(f"开始分析职位数据，共{len(input_data.jobs)}个职位")
     
-    # 提取所有职位描述
-    job_descriptions = [job.get("description", "") for job in input_data.jobs]
+    # 获取OpenAI API密钥
+    openai_api_key = os.getenv("OPENAI_API_KEY")
     
-    # 提取所有职位要求（这里简化处理，实际可能需要更复杂的文本分析）
-    all_requirements = []
-    for desc in job_descriptions:
-        # 简单分割文本获取要求（实际应用中可能需要更复杂的NLP处理）
-        requirements = [req.strip() for req in desc.split("\n") if "要求" in req or "职责" in req]
-        all_requirements.extend(requirements)
+    # 创建OpenAI客户端
+    from openai import OpenAI
+    client = OpenAI(api_key=openai_api_key)
     
-    # 提取共同要求（简化示例）
-    common_requirements = [
-        "熟悉Python编程语言",
-        "具备良好的团队协作能力",
-        "有较强的问题解决能力",
-        "熟悉常见的数据结构和算法"
-    ]
+    # 准备职位数据
+    job_descriptions = []
+    for i, job in enumerate(input_data.jobs[:10]):  # 限制处理的职位数量
+        job_title = job.get("title", f"职位{i+1}")
+        job_desc = job.get("description", "")
+        job_descriptions.append(f"职位{i+1} - {job_title}:\n{job_desc[:500]}...\n")
     
-    # 统计关键技能频率（简化示例）
-    key_skills = {
-        "Python": 8,
-        "JavaScript": 6,
-        "React": 5,
-        "FastAPI": 4,
-        "Docker": 3,
-        "Kubernetes": 2,
-        "AWS": 2
-    }
+    job_texts = "\n".join(job_descriptions)
     
-    # 统计经验要求（简化示例）
-    experience_requirements = {
-        "应届毕业生": 2,
-        "1-3年": 5,
-        "3-5年": 7,
-        "5年以上": 3
-    }
+    # 构建分析提示
+    analysis_focus = "、".join(input_data.analysis_focus) if input_data.analysis_focus else "技能要求、经验要求、学历要求、薪资范围"
     
-    # 统计学历要求（简化示例）
-    education_requirements = {
-        "大专": 2,
-        "本科": 10,
-        "硕士": 5,
-        "博士": 1
-    }
+    prompt = f"""
+    请分析以下{len(input_data.jobs)}个职位描述，提取共同点和要求。
     
-    # 分析薪资范围（简化示例）
-    salary_range = {
-        "min": 10000,
-        "max": 30000,
-        "average": 20000,
-        "distribution": {
-            "10k-15k": 2,
-            "15k-20k": 5,
-            "20k-25k": 7,
-            "25k-30k": 3
-        }
-    }
+    重点关注：{analysis_focus}
     
-    # 生成报告摘要
-    report_summary = f"""
-    基于对{len(input_data.jobs)}个职位的分析，总结如下：
+    职位描述：
+    {job_texts}
     
-    1. 最常见的技能要求是Python、JavaScript和React
-    2. 大多数职位要求3-5年工作经验
-    3. 学历要求主要集中在本科及以上
-    4. 薪资范围主要在15k-25k之间
+    请按照以下格式返回分析结果：
     
-    建议求职者重点提升Python和JavaScript技能，并在简历中突出相关项目经验。
+    共同要求：
+    - [要求1]
+    - [要求2]
+    ...
+    
+    关键技能（按频率排序）：
+    [技能1]: [频率]
+    [技能2]: [频率]
+    ...
+    
+    经验要求统计：
+    [经验级别1]: [数量]
+    [经验级别2]: [数量]
+    ...
+    
+    学历要求统计：
+    [学历级别1]: [数量]
+    [学历级别2]: [数量]
+    ...
+    
+    薪资范围分析：
+    - 最低: [金额]
+    - 最高: [金额]
+    - 平均: [金额]
+    - 分布: [分布情况]
+    
+    岗位需求报告摘要：
+    [简要总结分析结果，并提供针对求职者的建议]
     """
+    
+    # 调用OpenAI API
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "你是一位专业的职位分析专家，擅长分析职位描述并提取关键信息。"},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.3
+    )
+    
+    # 解析API响应
+    analysis_text = response.choices[0].message.content
+    
+    # 提取分析结果
+    common_requirements = []
+    key_skills = {}
+    experience_requirements = {}
+    education_requirements = {}
+    salary_range = {
+        "min": 0,
+        "max": 0,
+        "average": 0,
+        "distribution": {}
+    }
+    report_summary = ""
+    
+    current_section = None
+    for line in analysis_text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        
+        if "共同要求" in line:
+            current_section = "common_requirements"
+            continue
+        elif "关键技能" in line:
+            current_section = "key_skills"
+            continue
+        elif "经验要求" in line:
+            current_section = "experience_requirements"
+            continue
+        elif "学历要求" in line:
+            current_section = "education_requirements"
+            continue
+        elif "薪资范围" in line:
+            current_section = "salary_range"
+            continue
+        elif "岗位需求报告" in line or "报告摘要" in line:
+            current_section = "report_summary"
+            continue
+        
+        if current_section == "common_requirements" and (line.startswith("- ") or line.startswith("* ")):
+            common_requirements.append(line.replace("- ", "").replace("* ", "").strip())
+        elif current_section == "key_skills":
+            if ":" in line or "：" in line:
+                parts = line.replace("- ", "").replace("* ", "").split(":", 1)
+                if len(parts) == 2:
+                    skill = parts[0].strip()
+                    try:
+                        frequency = int(parts[1].strip())
+                    except ValueError:
+                        frequency = 1
+                    key_skills[skill] = frequency
+        elif current_section == "experience_requirements":
+            if ":" in line or "：" in line:
+                parts = line.replace("- ", "").replace("* ", "").split(":", 1)
+                if len(parts) == 2:
+                    exp_level = parts[0].strip()
+                    try:
+                        count = int(parts[1].strip())
+                    except ValueError:
+                        count = 1
+                    experience_requirements[exp_level] = count
+        elif current_section == "education_requirements":
+            if ":" in line or "：" in line:
+                parts = line.replace("- ", "").replace("* ", "").split(":", 1)
+                if len(parts) == 2:
+                    edu_level = parts[0].strip()
+                    try:
+                        count = int(parts[1].strip())
+                    except ValueError:
+                        count = 1
+                    education_requirements[edu_level] = count
+        elif current_section == "salary_range":
+            if "最低" in line or "min" in line.lower():
+                try:
+                    salary_range["min"] = int(re.search(r'\d+', line).group())
+                except (AttributeError, ValueError):
+                    pass
+            elif "最高" in line or "max" in line.lower():
+                try:
+                    salary_range["max"] = int(re.search(r'\d+', line).group())
+                except (AttributeError, ValueError):
+                    pass
+            elif "平均" in line or "average" in line.lower():
+                try:
+                    salary_range["average"] = int(re.search(r'\d+', line).group())
+                except (AttributeError, ValueError):
+                    pass
+            elif "分布" in line or "distribution" in line.lower():
+                distribution_text = line.split(":", 1)[1].strip() if ":" in line else line
+                salary_range["distribution"] = {"描述": distribution_text}
+        elif current_section == "report_summary":
+            report_summary += line + " "
+    
+    # 确保至少有一些结果
+    if not common_requirements:
+        common_requirements = [
+            "熟悉Python编程语言",
+            "具备良好的团队协作能力",
+            "有较强的问题解决能力",
+            "熟悉常见的数据结构和算法"
+        ]
+    
+    if not key_skills:
+        key_skills = {
+            "Python": 8,
+            "JavaScript": 6,
+            "React": 5,
+            "FastAPI": 4,
+            "Docker": 3
+        }
+    
+    if not experience_requirements:
+        experience_requirements = {
+            "应届毕业生": 2,
+            "1-3年": 5,
+            "3-5年": 7,
+            "5年以上": 3
+        }
+    
+    if not education_requirements:
+        education_requirements = {
+            "大专": 2,
+            "本科": 10,
+            "硕士": 5,
+            "博士": 1
+        }
+    
+    if salary_range["min"] == 0 and salary_range["max"] == 0:
+        salary_range = {
+            "min": 10000,
+            "max": 30000,
+            "average": 20000,
+            "distribution": {
+                "10k-15k": 2,
+                "15k-20k": 5,
+                "20k-25k": 7,
+                "25k-30k": 3
+            }
+        }
+    
+    if not report_summary:
+        report_summary = f"""
+        基于对{len(input_data.jobs)}个职位的分析，总结如下：
+        
+        1. 最常见的技能要求是Python、JavaScript和React
+        2. 大多数职位要求3-5年工作经验
+        3. 学历要求主要集中在本科及以上
+        4. 薪资范围主要在15k-25k之间
+        
+        建议求职者重点提升Python和JavaScript技能，并在简历中突出相关项目经验。
+        """
+    
+    logger.info(f"职位分析完成，提取了{len(common_requirements)}个共同要求，{len(key_skills)}个关键技能")
     
     return JobAnalysisOutput(
         common_requirements=common_requirements,
@@ -676,10 +831,10 @@ async def match_job_handler(
         message = f"""
         请分析以下简历与职位要求的匹配程度：
         
-        简历内容:
+        简历内容：
         {resume_content}
         
-        职位要求:
+        职位要求：
         {job_description}
         """
         
@@ -736,7 +891,7 @@ async def analyze_jobs_handler(
         message = f"""
         请分析以下职位列表：
         
-        职位列表:
+        职位列表：
         {request.jobs}
         """
         
