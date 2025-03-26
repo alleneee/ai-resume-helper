@@ -15,12 +15,15 @@ from openai.types.beta.threads import Run
 
 from agents import Agent as OpenAIAgent, RunStatus, Runner, AgentHooks, RunContextWrapper, Tool, trace
 from agents.tool import function_tool
+from agents import GuardrailFunctionOutput, input_guardrail, output_guardrail
 
 # 导入browser-use相关模块
 from browser_use import Agent as BrowserAgent
 from browser_use.browser.browser import Browser, BrowserConfig
 from browser_use.controller.service import Controller
 from langchain_openai import ChatOpenAI
+from langchain.prompts import ChatPromptTemplate
+from langchain.output_parsers import StrOutputParser
 
 from server.models.agent import (
     JobSearchRequest, 
@@ -131,8 +134,223 @@ class JobAnalysisOutput(BaseModel):
     salary_range: Dict[str, Any] = Field(..., description="薪资范围分析")
     report_summary: str = Field(..., description="岗位需求报告摘要")
 
+# 输入约束检查类
+class JobInputValidator(BaseModel):
+    is_valid: bool
+    reason: Optional[str] = None
+
+# 输出约束检查类
+class JobSearchValidator(BaseModel):
+    is_valid: bool
+    reason: Optional[str] = None
+    
+class JobMatchValidator(BaseModel):
+    is_valid: bool
+    reason: Optional[str] = None
+    
+class JobAnalysisValidator(BaseModel):
+    is_valid: bool
+    reason: Optional[str] = None
+
+# 职位要求输入约束
+@input_guardrail
+async def job_requirements_guardrail(
+    ctx: RunContextWrapper,
+    agent: OpenAIAgent,
+    job_requirements: str
+) -> GuardrailFunctionOutput:
+    """验证职位要求输入"""
+    # 检查职位要求长度
+    if not job_requirements or len(job_requirements) < 30:
+        return GuardrailFunctionOutput(
+            output_info=JobInputValidator(
+                is_valid=False,
+                reason="职位要求内容太短，无法进行有效匹配"
+            ),
+            tripwire_triggered=True
+        )
+    
+    return GuardrailFunctionOutput(
+        output_info=JobInputValidator(is_valid=True),
+        tripwire_triggered=False
+    )
+
+# 简历内容输入约束
+@input_guardrail
+async def resume_content_guardrail(
+    ctx: RunContextWrapper,
+    agent: OpenAIAgent,
+    resume_content: str
+) -> GuardrailFunctionOutput:
+    """验证简历内容输入"""
+    # 检查简历内容长度
+    if not resume_content or len(resume_content) < 50:
+        return GuardrailFunctionOutput(
+            output_info=JobInputValidator(
+                is_valid=False,
+                reason="简历内容太短，无法进行有效匹配"
+            ),
+            tripwire_triggered=True
+        )
+    
+    return GuardrailFunctionOutput(
+        output_info=JobInputValidator(is_valid=True),
+        tripwire_triggered=False
+    )
+
+# 职位数据输入约束
+@input_guardrail
+async def job_data_guardrail(
+    ctx: RunContextWrapper,
+    agent: OpenAIAgent,
+    jobs: List[Dict[str, Any]]
+) -> GuardrailFunctionOutput:
+    """验证职位数据输入"""
+    # 检查职位数量
+    if not jobs or len(jobs) < 1:
+        return GuardrailFunctionOutput(
+            output_info=JobInputValidator(
+                is_valid=False,
+                reason="职位数据为空，无法进行分析"
+            ),
+            tripwire_triggered=True
+        )
+    
+    # 检查职位数据是否包含必要字段
+    required_fields = ["title", "description"]
+    for i, job in enumerate(jobs):
+        missing_fields = [field for field in required_fields if field not in job or not job[field]]
+        if missing_fields:
+            return GuardrailFunctionOutput(
+                output_info=JobInputValidator(
+                    is_valid=False,
+                    reason=f"职位 #{i+1} 缺少必要字段: {', '.join(missing_fields)}"
+                ),
+                tripwire_triggered=True
+            )
+    
+    return GuardrailFunctionOutput(
+        output_info=JobInputValidator(is_valid=True),
+        tripwire_triggered=False
+    )
+
+# 搜索关键词输入约束
+@input_guardrail
+async def search_keywords_guardrail(
+    ctx: RunContextWrapper,
+    agent: OpenAIAgent,
+    keywords: List[str]
+) -> GuardrailFunctionOutput:
+    """验证搜索关键词输入"""
+    # 检查关键词数量
+    if not keywords or len(keywords) < 1:
+        return GuardrailFunctionOutput(
+            output_info=JobInputValidator(
+                is_valid=False,
+                reason="搜索关键词为空，无法进行搜索"
+            ),
+            tripwire_triggered=True
+        )
+    
+    return GuardrailFunctionOutput(
+        output_info=JobInputValidator(is_valid=True),
+        tripwire_triggered=False
+    )
+
+# 职位搜索输出约束
+@output_guardrail
+async def job_search_output_guardrail(
+    ctx: RunContextWrapper,
+    agent: OpenAIAgent,
+    output: JobSearchOutput
+) -> GuardrailFunctionOutput:
+    """验证职位搜索输出结果"""
+    # 检查是否有搜索结果
+    if not output.jobs or len(output.jobs) == 0:
+        return GuardrailFunctionOutput(
+            output_info=JobSearchValidator(
+                is_valid=False,
+                reason="搜索结果为空，未找到匹配的职位"
+            ),
+            tripwire_triggered=True
+        )
+    
+    return GuardrailFunctionOutput(
+        output_info=JobSearchValidator(is_valid=True),
+        tripwire_triggered=False
+    )
+
+# 职位匹配输出约束
+@output_guardrail
+async def job_match_output_guardrail(
+    ctx: RunContextWrapper,
+    agent: OpenAIAgent,
+    output: JobMatchOutput
+) -> GuardrailFunctionOutput:
+    """验证职位匹配输出结果"""
+    # 检查是否有匹配分析结果
+    if output.match_score < 0 or output.match_score > 1:
+        return GuardrailFunctionOutput(
+            output_info=JobMatchValidator(
+                is_valid=False,
+                reason="匹配分数无效，应该在0-1之间"
+            ),
+            tripwire_triggered=True
+        )
+    
+    # 检查是否有足够的建议
+    if not output.recommendations or len(output.recommendations) < 2:
+        return GuardrailFunctionOutput(
+            output_info=JobMatchValidator(
+                is_valid=False,
+                reason="匹配建议数量不足，至少需要2条建议"
+            ),
+            tripwire_triggered=True
+        )
+    
+    return GuardrailFunctionOutput(
+        output_info=JobMatchValidator(is_valid=True),
+        tripwire_triggered=False
+    )
+
+# 职位分析输出约束
+@output_guardrail
+async def job_analysis_output_guardrail(
+    ctx: RunContextWrapper,
+    agent: OpenAIAgent,
+    output: JobAnalysisOutput
+) -> GuardrailFunctionOutput:
+    """验证职位分析输出结果"""
+    # 检查是否有基本分析结果
+    if (not output.common_requirements or len(output.common_requirements) < 2 or
+            not output.key_skills or len(output.key_skills) < 3):
+        return GuardrailFunctionOutput(
+            output_info=JobAnalysisValidator(
+                is_valid=False,
+                reason="分析结果不够全面，缺少足够的共同要求或关键技能"
+            ),
+            tripwire_triggered=True
+        )
+    
+    # 检查报告摘要
+    if not output.report_summary or len(output.report_summary) < 50:
+        return GuardrailFunctionOutput(
+            output_info=JobAnalysisValidator(
+                is_valid=False,
+                reason="报告摘要过短，信息不足"
+            ),
+            tripwire_triggered=True
+        )
+    
+    return GuardrailFunctionOutput(
+        output_info=JobAnalysisValidator(is_valid=True),
+        tripwire_triggered=False
+    )
+
 # 职位搜索工具
 @function_tool
+@input_guardrail(search_keywords_guardrail)
+@output_guardrail(job_search_output_guardrail)
 async def search_jobs(params: JobSearchInput) -> JobSearchOutput:
     """根据指定条件搜索职位信息"""
     try:
@@ -283,6 +501,9 @@ def _get_mock_job_search_results(params: JobSearchInput) -> JobSearchOutput:
 
 # 职位匹配工具
 @function_tool
+@input_guardrail(resume_content_guardrail)
+@input_guardrail(job_requirements_guardrail)
+@output_guardrail(job_match_output_guardrail)
 def match_job(input_data: JobMatchInput) -> JobMatchOutput:
     """根据简历内容和职位要求进行匹配分析"""
     # 提取简历中的技能关键词
@@ -316,16 +537,21 @@ def match_job(input_data: JobMatchInput) -> JobMatchOutput:
 
 # 职位分析工具
 @function_tool
+@input_guardrail(job_data_guardrail)
+@output_guardrail(job_analysis_output_guardrail)
 def analyze_jobs(input_data: JobAnalysisInput) -> JobAnalysisOutput:
     """分析职位数据，提取共同点和要求"""
     logger.info(f"开始分析职位数据，共{len(input_data.jobs)}个职位")
     
-    # 获取OpenAI API密钥
+    # 获取OpenAI API密钥 (LangChain 会自动从环境变量获取，但这里显式设置以保持一致性)
     openai_api_key = os.getenv("OPENAI_API_KEY")
     
-    # 创建OpenAI客户端
-    from openai import OpenAI
-    client = OpenAI(api_key=openai_api_key)
+    # 创建 LangChain ChatOpenAI 实例
+    llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0.3,
+        api_key=openai_api_key
+    )
     
     # 准备职位数据
     job_descriptions = []
@@ -339,8 +565,9 @@ def analyze_jobs(input_data: JobAnalysisInput) -> JobAnalysisOutput:
     # 构建分析提示
     analysis_focus = "、".join(input_data.analysis_focus) if input_data.analysis_focus else "技能要求、经验要求、学历要求、薪资范围"
     
-    prompt = f"""
-    请分析以下{len(input_data.jobs)}个职位描述，提取共同点和要求。
+    # 构建分析提示模板
+    prompt_template = """
+    请分析以下{job_count}个职位描述，提取共同点和要求。
     
     重点关注：{analysis_focus}
     
@@ -379,18 +606,24 @@ def analyze_jobs(input_data: JobAnalysisInput) -> JobAnalysisOutput:
     [简要总结分析结果，并提供针对求职者的建议]
     """
     
-    # 调用OpenAI API
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "你是一位专业的职位分析专家，擅长分析职位描述并提取关键信息。"},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.3
-    )
+    # 创建 ChatPromptTemplate
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "你是一位专业的职位分析专家，擅长分析职位描述并提取关键信息。"),
+        ("user", prompt_template)
+    ])
     
-    # 解析API响应
-    analysis_text = response.choices[0].message.content
+    # 构建 LangChain 链
+    chain = prompt | llm | StrOutputParser()
+    
+    # 准备输入变量
+    input_variables = {
+        "job_count": len(input_data.jobs),
+        "analysis_focus": analysis_focus,
+        "job_texts": job_texts
+    }
+    
+    # 执行链并获取分析结果
+    analysis_text = chain.invoke(input_variables)
     
     # 提取分析结果
     common_requirements = []

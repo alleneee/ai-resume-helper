@@ -4,14 +4,21 @@
 from typing import Dict, Any, List, Optional
 import asyncio
 import logging
+import os
 from pydantic import BaseModel, Field
 
 from agents import Agent, Runner, function_tool, RunStatus, AgentHooks, RunContextWrapper, Tool, trace, handoff
 from agents.run import Run
 from agents.model_settings import ModelSettings
+from agents import GuardrailFunctionOutput, input_guardrail, output_guardrail
 
 from models.agent import ResumeOptimizationResult, ResumeOptimizationRequest, ResumeOptimizeRequest, ResumeOptimizeResponse
 from utils.response import ErrorCode
+
+# 导入 LangChain 相关库
+from langchain_openai import ChatOpenAI
+from langchain.prompts import ChatPromptTemplate
+from langchain.output_parsers import StrOutputParser
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -66,8 +73,141 @@ class ResumeOptimizationOutput(BaseModel):
     matched_skills: Optional[List[str]] = Field(None, description="与职位匹配的技能")
     missing_skills: Optional[List[str]] = Field(None, description="缺失的技能")
 
+# 输入约束检查类
+class ResumeContentValidator(BaseModel):
+    is_valid: bool
+    reason: Optional[str] = None
+
+# 输出约束检查类
+class ResumeAnalysisValidator(BaseModel):
+    is_valid: bool
+    reason: Optional[str] = None
+    
+class ResumeOptimizationValidator(BaseModel):
+    is_valid: bool
+    reason: Optional[str] = None
+
+# 简历内容输入约束
+@input_guardrail
+async def resume_content_guardrail(
+    ctx: RunContextWrapper,
+    agent: Agent,
+    resume_content: str
+) -> GuardrailFunctionOutput:
+    """验证简历内容输入"""
+    # 检查简历内容长度
+    if not resume_content or len(resume_content) < 50:
+        return GuardrailFunctionOutput(
+            output_info=ResumeContentValidator(
+                is_valid=False,
+                reason="简历内容太短，无法进行有效分析"
+            ),
+            tripwire_triggered=True
+        )
+    
+    # 检查内容是否包含必要的简历部分
+    required_sections = ["经验", "教育", "技能"]
+    missing_sections = [section for section in required_sections 
+                        if section.lower() not in resume_content.lower()]
+    
+    if missing_sections:
+        return GuardrailFunctionOutput(
+            output_info=ResumeContentValidator(
+                is_valid=False,
+                reason=f"简历内容缺少关键部分: {', '.join(missing_sections)}"
+            ),
+            tripwire_triggered=True
+        )
+    
+    return GuardrailFunctionOutput(
+        output_info=ResumeContentValidator(is_valid=True),
+        tripwire_triggered=False
+    )
+
+# 职位描述输入约束
+@input_guardrail
+async def job_description_guardrail(
+    ctx: RunContextWrapper,
+    agent: Agent,
+    job_description: str
+) -> GuardrailFunctionOutput:
+    """验证职位描述输入"""
+    # 检查职位描述长度
+    if not job_description or len(job_description) < 30:
+        return GuardrailFunctionOutput(
+            output_info=ResumeContentValidator(
+                is_valid=False,
+                reason="职位描述太短，无法进行有效优化"
+            ),
+            tripwire_triggered=True
+        )
+    
+    return GuardrailFunctionOutput(
+        output_info=ResumeContentValidator(is_valid=True),
+        tripwire_triggered=False
+    )
+
+# 简历分析输出约束
+@output_guardrail
+async def resume_analysis_output_guardrail(
+    ctx: RunContextWrapper,
+    agent: Agent,
+    output: ResumeAnalysisOutput
+) -> GuardrailFunctionOutput:
+    """验证简历分析输出结果"""
+    # 检查是否有足够的分析内容
+    if (len(output.strengths) < 2 or len(output.weaknesses) < 2 or 
+            len(output.keywords) < 3 or len(output.skill_gaps) < 1):
+        return GuardrailFunctionOutput(
+            output_info=ResumeAnalysisValidator(
+                is_valid=False,
+                reason="分析结果不够全面，缺少足够的分析要点"
+            ),
+            tripwire_triggered=True
+        )
+    
+    return GuardrailFunctionOutput(
+        output_info=ResumeAnalysisValidator(is_valid=True),
+        tripwire_triggered=False
+    )
+
+# 简历优化输出约束
+@output_guardrail
+async def resume_optimization_output_guardrail(
+    ctx: RunContextWrapper,
+    agent: Agent,
+    output: ResumeOptimizationOutput
+) -> GuardrailFunctionOutput:
+    """验证简历优化输出结果"""
+    # 检查优化后的内容长度
+    if len(output.optimized_content) < 100:
+        return GuardrailFunctionOutput(
+            output_info=ResumeOptimizationValidator(
+                is_valid=False,
+                reason="优化后的简历内容过短，不够完整"
+            ),
+            tripwire_triggered=True
+        )
+    
+    # 检查是否有足够的建议
+    if len(output.suggestions) < 3:
+        return GuardrailFunctionOutput(
+            output_info=ResumeOptimizationValidator(
+                is_valid=False,
+                reason="改进建议数量不足，至少需要3条建议"
+            ),
+            tripwire_triggered=True
+        )
+    
+    return GuardrailFunctionOutput(
+        output_info=ResumeOptimizationValidator(is_valid=True),
+        tripwire_triggered=False
+    )
+
 # 简历分析工具
 @function_tool
+@input_guardrail(resume_content_guardrail)
+@output_guardrail(resume_analysis_output_guardrail)
 def analyze_resume(resume_content: str) -> ResumeAnalysisOutput:
     """
     分析简历内容，提取优势、劣势、关键词和技能缺口
@@ -80,15 +220,18 @@ def analyze_resume(resume_content: str) -> ResumeAnalysisOutput:
     """
     logger.debug("调用简历分析工具")
     
-    # 获取OpenAI API密钥
+    # 获取OpenAI API密钥 (LangChain 会自动从环境变量获取，但这里显式设置以保持一致性)
     openai_api_key = os.getenv("OPENAI_API_KEY")
     
-    # 创建OpenAI客户端
-    from openai import OpenAI
-    client = OpenAI(api_key=openai_api_key)
+    # 创建 LangChain ChatOpenAI 实例
+    llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0.3,
+        api_key=openai_api_key
+    )
     
-    # 构建分析提示
-    prompt = f"""
+    # 构建分析提示模板
+    prompt_template = """
     请分析以下简历内容，提取其中的优势、劣势、关键词和可能的技能缺口。
     
     简历内容：
@@ -113,18 +256,17 @@ def analyze_resume(resume_content: str) -> ResumeAnalysisOutput:
     [技能缺口1], [技能缺口2], ...
     """
     
-    # 调用OpenAI API
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "你是一位专业的简历分析专家，擅长分析简历内容并提供客观评价。"},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.3
-    )
+    # 创建 ChatPromptTemplate
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "你是一位专业的简历分析专家，擅长分析简历内容并提供客观评价。"),
+        ("user", prompt_template)
+    ])
     
-    # 解析API响应
-    analysis_text = response.choices[0].message.content
+    # 构建 LangChain 链
+    chain = prompt | llm | StrOutputParser()
+    
+    # 执行链并获取分析结果
+    analysis_text = chain.invoke({"resume_content": resume_content})
     
     # 提取分析结果（简化处理，实际应用中可能需要更复杂的解析）
     strengths = []
@@ -191,6 +333,9 @@ def analyze_resume(resume_content: str) -> ResumeAnalysisOutput:
 
 # 简历优化工具
 @function_tool
+@input_guardrail(resume_content_guardrail)
+@input_guardrail(job_description_guardrail)
+@output_guardrail(resume_optimization_output_guardrail)
 def optimize_resume(
     resume_content: str, 
     job_description: str, 
@@ -211,12 +356,15 @@ def optimize_resume(
     """
     logger.debug("调用简历优化工具")
     
-    # 获取OpenAI API密钥
+    # 获取OpenAI API密钥 (LangChain 会自动从环境变量获取，但这里显式设置以保持一致性)
     openai_api_key = os.getenv("OPENAI_API_KEY")
     
-    # 创建OpenAI客户端
-    from openai import OpenAI
-    client = OpenAI(api_key=openai_api_key)
+    # 创建 LangChain ChatOpenAI 实例
+    llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0.3,
+        api_key=openai_api_key
+    )
     
     # 准备职位分析信息
     job_analysis_text = ""
@@ -235,8 +383,8 @@ def optimize_resume(
     if focus_areas:
         focus_areas_text = f"\n需要重点关注的领域或技能: {', '.join(focus_areas)}"
     
-    # 构建优化提示
-    prompt = f"""
+    # 构建优化提示模板
+    prompt_template = """
     请根据以下信息优化简历内容：
     
     目标职位描述：
@@ -261,18 +409,25 @@ def optimize_resume(
     - 调整内容顺序，将最相关的经验放在前面
     """
     
-    # 调用OpenAI API
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "你是一位专业的简历优化专家，擅长根据职位要求优化简历内容。"},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.3
-    )
+    # 创建 ChatPromptTemplate
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "你是一位专业的简历优化专家，擅长根据职位要求优化简历内容。"),
+        ("user", prompt_template)
+    ])
     
-    # 解析API响应
-    optimization_text = response.choices[0].message.content
+    # 构建 LangChain 链
+    chain = prompt | llm | StrOutputParser()
+    
+    # 准备输入变量
+    input_variables = {
+        "job_description": job_description,
+        "resume_content": resume_content,
+        "focus_areas_text": focus_areas_text,
+        "job_analysis_text": job_analysis_text
+    }
+    
+    # 执行链并获取优化结果
+    optimization_text = chain.invoke(input_variables)
     
     # 提取优化结果（简化处理，实际应用中可能需要更复杂的解析）
     optimized_content = ""
