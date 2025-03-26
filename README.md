@@ -4,9 +4,9 @@
 
 ## 项目功能
 
-1. **智能简历分析**：自动解析简历内容，评估质量和有效性
-2. **简历优化建议**：AI生成针对性的优化建议，提升简历质量
-3. **职位匹配**：分析简历与职位匹配度，找出优势和不足
+1. **智能简历分析**：利用OpenAI API实时解析简历内容，评估质量和有效性
+2. **简历优化建议**：基于大模型生成针对性的优化建议，提升简历质量
+3. **职位匹配**：实时分析简历与职位匹配度，找出优势和不足
 4. **职位搜索**：智能搜索合适的职位并推荐
 5. **求职信生成**：基于简历和职位自动生成定制化求职信
 6. **申请跟踪**：集中管理所有投递申请状态
@@ -30,7 +30,8 @@
 
 ### AI/ML
 
-- OpenAI API (GPT-4)
+- OpenAI API (GPT-4o)
+- OpenAI Agents SDK
 - 自然语言处理
 - 文档解析技术
 
@@ -50,7 +51,10 @@ ai-resume-helper/
 │   │   ├── agent.py             # 代理模型
 │   │   └── database.py          # 数据库连接
 │   ├── services/                # 业务逻辑
-│   │   └── agent_service.py     # AI代理服务
+│   │   ├── agent_service.py     # AI代理服务
+│   │   └── agents/              # AI代理实现
+│   │       ├── resume_agent.py  # 简历分析和优化代理
+│   │       └── job_agent.py     # 职位分析和匹配代理
 │   ├── middleware/              # 中间件
 │   │   └── auth.py              # 认证中间件
 │   ├── utils/                   # 工具函数
@@ -95,8 +99,8 @@ MONGODB_URL=mongodb://localhost:27017
 DATABASE_NAME=ai_resume_helper
 SECRET_KEY=your_secret_key
 ACCESS_TOKEN_EXPIRE_MINUTES=30
-AI_API_KEY=your_openai_api_key
-AI_MODEL=gpt-4
+OPENAI_API_KEY=your_openai_api_key  # OpenAI API密钥
+AI_MODEL=gpt-4o  # 使用的OpenAI模型
 JOB_SEARCH_API_KEY=your_job_search_api_key
 FIRECRAWL_API_KEY=fc-your_firecrawl_api_key  # 用于网页爬取的Firecrawl API密钥
 ```
@@ -163,6 +167,7 @@ npm run dev
 
 ## 技术特点
 
+- **实时AI处理**：使用OpenAI API进行实时简历分析和优化
 - **异步API**：使用FastAPI的异步特性，提高并发性能
 - **强类型验证**：使用Pydantic v2进行请求和响应验证
 - **标准化响应**：统一的API响应格式
@@ -171,6 +176,18 @@ npm run dev
 - **异常处理**：全局异常处理和详细错误信息
 - **OpenAPI文档**：自动生成的API文档
 - **Firecrawl集成**：高效网页爬取和内容提取
+
+## 安全性
+
+本项目重视安全性，定期更新依赖项以修复已知的安全漏洞。最近的安全更新包括：
+
+- 更新了python-multipart到0.0.7+版本
+- 更新了bcrypt到4.1.0+版本
+- 更新了PyJWT到2.8.0+版本
+- 更新了OpenAI SDK到1.0.0+版本
+- 更新了Pillow到10.0.0+版本
+
+如果发现任何安全问题，请通过创建Issue报告。
 
 ## 贡献指南
 
