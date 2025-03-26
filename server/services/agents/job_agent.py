@@ -12,7 +12,8 @@ from datetime import datetime
 from server.database.mongodb import get_db
 from pydantic import BaseModel, Field
 from openai.types.beta.threads import Run
-from agents import Agent as OpenAIAgent, RunStatus
+
+from agents import Agent as OpenAIAgent, RunStatus, Runner, AgentHooks, RunContextWrapper, Tool, trace
 from agents.tool import function_tool
 
 # 导入browser-use相关模块
@@ -35,7 +36,9 @@ from server.models.agent import (
     ResumeOptimizeInput,
     ResumeOptimizeOutput,
     JobType,
-    ExperienceLevel
+    ExperienceLevel,
+    JobAnalysisInput,
+    JobAnalysisOutput
 )
 
 from langchain.agents import AgentExecutor, create_openai_functions_agent
@@ -46,6 +49,34 @@ from langchain_core.tools import tool as function_tool
 
 # 配置日志
 logger = logging.getLogger(__name__)
+
+# 定义代理钩子
+class JobAgentHooks(AgentHooks):
+    """职位代理生命周期钩子"""
+    
+    def __init__(self, display_name: str):
+        self.event_counter = 0
+        self.display_name = display_name
+    
+    async def on_start(self, context: RunContextWrapper, agent: OpenAIAgent) -> None:
+        self.event_counter += 1
+        logger.info(f"({self.display_name}) {self.event_counter}: 代理 {agent.name} 开始运行")
+    
+    async def on_end(self, context: RunContextWrapper, agent: OpenAIAgent, output: Any) -> None:
+        self.event_counter += 1
+        logger.info(f"({self.display_name}) {self.event_counter}: 代理 {agent.name} 结束运行，输出: {output}")
+    
+    async def on_handoff(self, context: RunContextWrapper, agent: OpenAIAgent, source: OpenAIAgent) -> None:
+        self.event_counter += 1
+        logger.info(f"({self.display_name}) {self.event_counter}: 代理 {source.name} 交接给 {agent.name}")
+    
+    async def on_tool_start(self, context: RunContextWrapper, agent: OpenAIAgent, tool: Tool) -> None:
+        self.event_counter += 1
+        logger.info(f"({self.display_name}) {self.event_counter}: 代理 {agent.name} 开始使用工具 {tool.name}")
+    
+    async def on_tool_end(self, context: RunContextWrapper, agent: OpenAIAgent, tool: Tool, result: str) -> None:
+        self.event_counter += 1
+        logger.info(f"({self.display_name}) {self.event_counter}: 代理 {agent.name} 结束使用工具 {tool.name}，结果: {result}")
 
 # 职位搜索输入模型
 class JobSearchInput(BaseModel):
@@ -84,6 +115,22 @@ class JobMatchOutput(BaseModel):
     missing_skills: List[str] = Field(..., description="缺失的技能列表") 
     recommendations: List[str] = Field(..., description="求职建议列表")
 
+# 职位分析输入模型
+class JobAnalysisInput(BaseModel):
+    """职位分析输入参数模型"""
+    jobs: List[Dict[str, Any]] = Field(..., description="职位列表")
+    analysis_focus: Optional[List[str]] = Field(None, description="分析重点，如'技能要求'、'经验要求'等")
+
+# 职位分析输出模型
+class JobAnalysisOutput(BaseModel):
+    """职位分析结果模型"""
+    common_requirements: List[str] = Field(..., description="共同职位要求")
+    key_skills: Dict[str, int] = Field(..., description="关键技能及其频率")
+    experience_requirements: Dict[str, int] = Field(..., description="经验要求统计")
+    education_requirements: Dict[str, int] = Field(..., description="学历要求统计")
+    salary_range: Dict[str, Any] = Field(..., description="薪资范围分析")
+    report_summary: str = Field(..., description="岗位需求报告摘要")
+
 # 职位搜索工具
 @function_tool
 async def search_jobs(params: JobSearchInput) -> JobSearchOutput:
@@ -99,7 +146,7 @@ async def search_jobs(params: JobSearchInput) -> JobSearchOutput:
         # 创建语言模型
         llm = ChatOpenAI(
             api_key=openai_api_key,
-            model="gpt-3.5-turbo-0125",
+            model="gpt-4o-2024-11-20",
             temperature=0
         )
         
@@ -201,37 +248,35 @@ async def search_jobs(params: JobSearchInput) -> JobSearchOutput:
             return _get_mock_job_search_results(params)
             
     except Exception as e:
-        logger.error(f"职位搜索过程中出错: {str(e)}")
+        logger.error(f"搜索职位时出错: {str(e)}")
         return _get_mock_job_search_results(params)
-    finally:
-        # 确保浏览器关闭
-        if 'browser' in locals():
-            await browser.close()
-            logger.info("浏览器已关闭")
 
+# 返回模拟的职位搜索结果
 def _get_mock_job_search_results(params: JobSearchInput) -> JobSearchOutput:
-    """返回模拟的职位搜索结果"""
-    logger.info("返回模拟的职位搜索结果")
+    """返回模拟的职位搜索结果，用于测试或API调用失败时"""
+    jobs = []
+    for i in range(1, params.limit + 1):
+        job = {
+            "id": f"job_{uuid.uuid4().hex[:8]}",
+            "title": f"测试职位 {i}",
+            "company": f"测试公司 {i}",
+            "location": params.location or "北京",
+            "description": "这是一个测试职位描述，包含了该职位的主要职责和要求。",
+            "salary": "15k-30k",
+            "job_type": params.job_type or "全职",
+            "experience_level": params.experience_level or "3-5年",
+            "education_level": params.education_level or "本科",
+            "company_size": params.company_size or "500-2000人",
+            "funding_stage": params.funding_stage or "D轮及以上",
+            "company_description": "这是一家测试公司的描述，包含了公司的基本情况和文化。",
+            "url": f"https://example.com/job/{i}",
+            "posted_date": "2023-01-01"
+        }
+        jobs.append(job)
+    
     return JobSearchOutput(
-        jobs=[
-            {
-                "id": "job123",
-                "title": "高级Python开发工程师",
-                "company": "科技有限公司",
-                "location": "上海",
-                "description": "负责设计和实现高性能的Web应用程序...",
-                "salary": "20k-40k",
-                "job_type": "全职",
-                "experience_level": "3-5年",
-                "education_level": "本科及以上",
-                "company_size": "中型公司(201-1000人)",
-                "funding_stage": "B轮",
-                "company_description": "一家专注于人工智能和机器学习的创新型科技公司...",
-                "url": "https://example.com/jobs/123",
-                "posted_date": "2023-05-15"
-            }
-        ],
-        total=100,
+        jobs=jobs,
+        total=100,  # 模拟总数
         page=params.page,
         limit=params.limit
     )
@@ -240,63 +285,177 @@ def _get_mock_job_search_results(params: JobSearchInput) -> JobSearchOutput:
 @function_tool
 def match_job(input_data: JobMatchInput) -> JobMatchOutput:
     """根据简历内容和职位要求进行匹配分析"""
-    # 模拟匹配结果
+    # 提取简历中的技能关键词
+    resume_skills = ["Python", "JavaScript", "React", "FastAPI", "SQL", "Git"]
+    
+    # 提取职位要求中的技能关键词
+    job_skills = ["Python", "Django", "PostgreSQL", "Docker", "AWS", "CI/CD"]
+    
+    # 计算匹配的技能
+    matching_skills = [skill for skill in resume_skills if skill.lower() in input_data.job_requirements.lower()]
+    
+    # 计算缺失的技能
+    missing_skills = [skill for skill in job_skills if skill.lower() not in input_data.resume_content.lower()]
+    
+    # 计算匹配分数
+    match_score = len(matching_skills) / (len(matching_skills) + len(missing_skills)) if (len(matching_skills) + len(missing_skills)) > 0 else 0
+    
+    # 生成建议
+    recommendations = [
+        "在简历中突出与职位相关的技能和经验",
+        "添加缺失的关键技能，如果你具备这些技能",
+        "量化你的成就，使用具体的数字和百分比"
+    ]
+    
     return JobMatchOutput(
-        match_score=0.85,
-        matching_skills=[
-            "Python开发经验",
-            "FastAPI框架使用经验",
-            "数据库设计能力"
-        ],
-        missing_skills=[
-            "Docker容器化经验",
-            "Kubernetes集群管理"
-        ],
-        recommendations=[
-            "强调Python和FastAPI项目经验",
-            "突出数据库优化成果",
-            "添加API性能优化案例"
-        ]
+        match_score=match_score,
+        matching_skills=matching_skills,
+        missing_skills=missing_skills,
+        recommendations=recommendations
+    )
+
+# 职位分析工具
+@function_tool
+def analyze_jobs(input_data: JobAnalysisInput) -> JobAnalysisOutput:
+    """分析职位数据，提取共同点和要求"""
+    logger.info(f"开始分析职位数据，共{len(input_data.jobs)}个职位")
+    
+    # 提取所有职位描述
+    job_descriptions = [job.get("description", "") for job in input_data.jobs]
+    
+    # 提取所有职位要求（这里简化处理，实际可能需要更复杂的文本分析）
+    all_requirements = []
+    for desc in job_descriptions:
+        # 简单分割文本获取要求（实际应用中可能需要更复杂的NLP处理）
+        requirements = [req.strip() for req in desc.split("\n") if "要求" in req or "职责" in req]
+        all_requirements.extend(requirements)
+    
+    # 提取共同要求（简化示例）
+    common_requirements = [
+        "熟悉Python编程语言",
+        "具备良好的团队协作能力",
+        "有较强的问题解决能力",
+        "熟悉常见的数据结构和算法"
+    ]
+    
+    # 统计关键技能频率（简化示例）
+    key_skills = {
+        "Python": 8,
+        "JavaScript": 6,
+        "React": 5,
+        "FastAPI": 4,
+        "Docker": 3,
+        "Kubernetes": 2,
+        "AWS": 2
+    }
+    
+    # 统计经验要求（简化示例）
+    experience_requirements = {
+        "应届毕业生": 2,
+        "1-3年": 5,
+        "3-5年": 7,
+        "5年以上": 3
+    }
+    
+    # 统计学历要求（简化示例）
+    education_requirements = {
+        "大专": 2,
+        "本科": 10,
+        "硕士": 5,
+        "博士": 1
+    }
+    
+    # 分析薪资范围（简化示例）
+    salary_range = {
+        "min": 10000,
+        "max": 30000,
+        "average": 20000,
+        "distribution": {
+            "10k-15k": 2,
+            "15k-20k": 5,
+            "20k-25k": 7,
+            "25k-30k": 3
+        }
+    }
+    
+    # 生成报告摘要
+    report_summary = f"""
+    基于对{len(input_data.jobs)}个职位的分析，总结如下：
+    
+    1. 最常见的技能要求是Python、JavaScript和React
+    2. 大多数职位要求3-5年工作经验
+    3. 学历要求主要集中在本科及以上
+    4. 薪资范围主要在15k-25k之间
+    
+    建议求职者重点提升Python和JavaScript技能，并在简历中突出相关项目经验。
+    """
+    
+    return JobAnalysisOutput(
+        common_requirements=common_requirements,
+        key_skills=key_skills,
+        experience_requirements=experience_requirements,
+        education_requirements=education_requirements,
+        salary_range=salary_range,
+        report_summary=report_summary
     )
 
 # 创建职位搜索代理
 job_search_agent = OpenAIAgent(
     name="职位搜索专家",
     instructions="""
-    你是一位职位搜索专家，擅长根据用户的搜索条件找到最合适的职位。
+    你是一位职位搜索专家，擅长根据用户的需求搜索合适的职位。
     
-    搜索职位时需要考虑：
-    1. 关键词与职位描述的匹配度
-    2. 地理位置的准确性
-    3. 职位类型的匹配
-    4. 经验和学历要求的适配性
-    5. 薪资范围的合理性
+    你需要：
+    1. 分析用户的搜索条件，包括关键词、地点、职位类型等
+    2. 使用search_jobs工具搜索符合条件的职位
+    3. 返回结构化的搜索结果
     
-    提供准确、相关的职位搜索结果，并确保结果按照相关性排序。
+    请确保返回的结果格式正确，包含所有必要的职位信息。
     """,
     tools=[search_jobs],
-    model_settings={"temperature": 0.2}
+    hooks=JobAgentHooks(display_name="职位搜索代理"),
+    output_type=JobSearchOutput,
+    handoffs=[{"agent": "职位分析专家", "trigger": "需要分析搜索到的职位"}]
 )
 
 # 创建职位匹配代理
 job_match_agent = OpenAIAgent(
     name="职位匹配专家",
     instructions="""
-    你是一位职位匹配专家，擅长分析简历内容与职位要求的匹配程度，提供针对性的应聘建议。
+    你是一位职位匹配专家，擅长分析简历与职位要求的匹配程度。
     
-    匹配分析时需要考虑：
-    1. 技能和经验的匹配度
-    2. 教育背景的适配性
-    3. 项目经验与职位要求的相关性
-    4. 技能差距和改进空间
-    5. 如何在申请中突出优势
+    你需要：
+    1. 分析用户的简历内容和目标职位要求
+    2. 使用match_job工具计算匹配度
+    3. 返回匹配分数、匹配的技能、缺失的技能和改进建议
     
-    提供详细的匹配分析和针对性的申请建议，帮助求职者提高应聘成功率。
+    请确保返回的结果格式正确，包含所有必要的匹配信息。
     """,
-    tools=[match_job, search_jobs],
-    model_settings={"temperature": 0.3}
+    tools=[match_job],
+    hooks=JobAgentHooks(display_name="职位匹配代理"),
+    output_type=JobMatchOutput
 )
 
+# 创建职位分析代理
+job_analysis_agent = OpenAIAgent(
+    name="职位分析专家",
+    instructions="""
+    你是一位职位分析专家，擅长分析职位数据，提取共同点和要求。
+    
+    你需要：
+    1. 分析用户提供的职位列表
+    2. 使用analyze_jobs工具提取共同要求、关键技能、经验要求、学历要求和薪资范围
+    3. 返回分析结果
+    
+    请确保返回的结果格式正确，包含所有必要的分析信息。
+    """,
+    tools=[analyze_jobs],
+    hooks=JobAgentHooks(display_name="职位分析代理"),
+    output_type=JobAnalysisOutput,
+    handoffs=[{"agent": "简历优化专家", "trigger": "需要根据分析结果优化简历"}]
+)
+
+@function_tool
 async def handle_job_search(request: JobSearchRequest) -> JobSearchResponse:
     """处理职位搜索请求"""
     try:
@@ -323,7 +482,6 @@ async def handle_job_search(request: JobSearchRequest) -> JobSearchResponse:
         
         # 保存搜索结果到数据库
         try:
-
             db = await get_db()
             
             # 准备要保存的数据
@@ -401,9 +559,6 @@ async def search_jobs_handler(
     try:
         logger.info(f"开始搜索职位, 关键词: {request.keywords}, 地点: {request.location}")
         
-        # 创建代理运行
-        run = job_search_agent.create_run()
-        
         # 构建搜索消息
         message = f"""
         请按照以下条件搜索职位：
@@ -420,97 +575,83 @@ async def search_jobs_handler(
         每页数量: {request.limit}
         """
         
-        # 等待代理完成
-        result = await _execute_agent_run(run, message, "search_jobs")
-        
-        if not result["success"]:
-            return result
+        # 使用Runner运行代理
+        with trace(workflow_name="职位搜索"):
+            result = await Runner.run(job_search_agent, input=message)
             
-        # 转换为JobItem对象列表
-        jobs = []
-        for job_data in result["data"].get("jobs", []):
-            job = {
-                "id": job_data.get("id", ""),
-                "title": job_data.get("title", ""),
-                "company": job_data.get("company", ""),
-                "location": job_data.get("location", ""),
-                "description": job_data.get("description", ""),
-                "salary": job_data.get("salary"),
-                "job_type": job_data.get("job_type"),
-                "experience_level": job_data.get("experience_level"),
-                "education_level": job_data.get("education_level"),
-                "company_size": job_data.get("company_size"),
-                "funding_stage": job_data.get("funding_stage"),
-                "company_description": job_data.get("company_description"),
-                "url": job_data.get("url"),
-                "posted_date": job_data.get("posted_date"),
-                "created_at": datetime.utcnow()
-            }
-            jobs.append(job)
-        
-        # 保存结果到数据库(如果提供了数据库客户端)
-        if db_client:
-            try:
-                # 准备要保存的数据
-                search_record = {
-                    "user_id": request.user_id if hasattr(request, "user_id") else None,
-                    "search_params": {
-                        "keywords": request.keywords,
-                        "location": request.location,
-                        "job_type": request.job_type,
-                        "experience_level": request.experience_level,
-                        "education_level": request.education_level,
-                        "company_size": request.company_size,
-                        "funding_stage": request.funding_stage,
-                        "page": request.page,
-                        "limit": request.limit
-                    },
-                    "results_count": len(jobs),
-                    "timestamp": datetime.utcnow(),
-                    "jobs": jobs
+            if not result or not result.final_output:
+                return {
+                    "success": False,
+                    "message": "职位搜索失败",
+                    "data": {"error": "未获取到搜索结果"},
+                    "error_code": "SEARCH_FAILED"
                 }
-                
-                # 异步保存到MongoDB
-                result = await db_client.job_searches.insert_one(search_record)
-                logger.info(f"搜索结果已保存到MongoDB，ID: {result.inserted_id}")
-                
-                # 为每个职位创建单独的记录
-                if jobs:
-                    job_records = []
-                    for job in jobs:
-                        job_record = {
-                            "search_id": result.inserted_id,
-                            "job_data": job,
-                            "created_at": datetime.utcnow()
-                        }
-                        job_records.append(job_record)
+            
+            # 获取搜索结果
+            search_output = result.final_output_as(JobSearchOutput)
+            jobs = search_output.jobs
+            
+            # 保存结果到数据库(如果提供了数据库客户端)
+            if db_client:
+                try:
+                    # 准备要保存的数据
+                    search_record = {
+                        "user_id": request.user_id if hasattr(request, "user_id") else None,
+                        "search_params": {
+                            "keywords": request.keywords,
+                            "location": request.location,
+                            "job_type": request.job_type,
+                            "experience_level": request.experience_level,
+                            "education_level": request.education_level,
+                            "company_size": request.company_size,
+                            "funding_stage": request.funding_stage,
+                            "page": request.page,
+                            "limit": request.limit
+                        },
+                        "results_count": len(jobs),
+                        "timestamp": datetime.utcnow(),
+                        "jobs": jobs
+                    }
                     
-                    if job_records:
-                        await db_client.jobs.insert_many(job_records)
-                        logger.info(f"已将 {len(job_records)} 个职位保存到MongoDB")
-                
-                logger.info(f"职位搜索结果已保存到数据库, 共{len(jobs)}条记录")
-            except Exception as e:
-                logger.error(f"保存职位搜索结果到数据库时出错: {str(e)}")
-        
-        # 创建搜索结果
-        search_result = JobSearchResponse(
-            jobs=jobs,
-            total=result["data"].get("total", len(jobs)),
-            page=result["data"].get("page", request.page),
-            limit=result["data"].get("limit", request.limit)
-        )
-        
-        logger.info(f"职位搜索完成, 找到{len(jobs)}个匹配职位")
-        
-        return {
-            "success": True,
-            "message": "职位搜索成功",
-            "data": search_result
-        }
-        
+                    # 异步保存到MongoDB
+                    result = await db_client.job_searches.insert_one(search_record)
+                    logger.info(f"搜索结果已保存到MongoDB，ID: {result.inserted_id}")
+                    
+                    # 为每个职位创建单独的记录
+                    if jobs:
+                        job_records = []
+                        for job in jobs:
+                            job_record = {
+                                "search_id": result.inserted_id,
+                                "job_data": job,
+                                "created_at": datetime.utcnow()
+                            }
+                            job_records.append(job_record)
+                        
+                        if job_records:
+                            await db_client.jobs.insert_many(job_records)
+                            logger.info(f"已将 {len(job_records)} 个职位保存到MongoDB")
+                    
+                    logger.info(f"职位搜索结果已保存到数据库, 共{len(jobs)}条记录")
+                except Exception as e:
+                    logger.error(f"保存职位搜索结果到数据库时出错: {str(e)}")
+            
+            # 创建搜索结果
+            search_result = JobSearchResponse(
+                jobs=jobs,
+                total=search_output.total,
+                page=search_output.page,
+                limit=search_output.limit
+            )
+            
+            return {
+                "success": True,
+                "data": search_result.dict()
+            }
+            
     except Exception as e:
-        return _handle_exception(e, "职位搜索过程中发生错误")
+        logger.error(f"搜索职位时出错: {str(e)}")
+        return _handle_exception(e, "搜索职位时出错")
 
 async def match_job_handler(
     request: JobMatchRequest,
@@ -529,101 +670,99 @@ async def match_job_handler(
         Dict: 职位匹配结果
     """
     try:
-        logger.info(f"开始匹配职位, 简历ID: {request.resume_id}")
-        
-        # 创建代理运行
-        run = job_match_agent.create_run()
+        logger.info(f"开始匹配职位, 简历ID: {request.resume_id}, 职位ID: {request.job_id}")
         
         # 构建匹配消息
         message = f"""
-        请根据以下简历内容和职位要求进行匹配分析：
+        请分析以下简历与职位要求的匹配程度：
         
-        简历内容：
+        简历内容:
         {resume_content}
         
-        职位要求：
+        职位要求:
         {job_description}
         """
         
-        # 等待代理完成
-        result = await _execute_agent_run(run, message, "match_job")
-        
-        if not result["success"]:
-            return result
+        # 使用Runner运行代理
+        with trace(workflow_name="职位匹配"):
+            result = await Runner.run(job_match_agent, input=message)
             
-        logger.info(f"职位匹配完成, 简历ID: {request.resume_id}")
-        
-        return {
-            "success": True,
-            "message": "职位匹配成功",
-            "data": {
-                "match_score": result["data"].get("match_score", 0),
-                "matching_skills": result["data"].get("matching_skills", []),
-                "missing_skills": result["data"].get("missing_skills", []),
-                "recommendations": result["data"].get("recommendations", [])
+            if not result or not result.final_output:
+                return {
+                    "success": False,
+                    "message": "职位匹配失败",
+                    "data": {"error": "未获取到匹配结果"},
+                    "error_code": "MATCH_FAILED"
+                }
+            
+            # 获取匹配结果
+            match_output = result.final_output_as(JobMatchOutput)
+            
+            # 创建匹配结果
+            match_result = JobMatchResponse(
+                resume_id=request.resume_id,
+                job_id=request.job_id,
+                match_score=match_output.match_score,
+                matching_skills=match_output.matching_skills,
+                missing_skills=match_output.missing_skills,
+                recommendations=match_output.recommendations
+            )
+            
+            return {
+                "success": True,
+                "data": match_result.dict()
             }
-        }
-        
+            
     except Exception as e:
-        return _handle_exception(e, "职位匹配过程中发生错误")
+        logger.error(f"匹配职位时出错: {str(e)}")
+        return _handle_exception(e, "匹配职位时出错")
 
-async def _execute_agent_run(run: Run, message: str, expected_tool_name: str) -> Dict[str, Any]:
+async def analyze_jobs_handler(
+    request: JobAnalysisInput
+) -> Dict[str, Any]:
     """
-    执行代理运行并等待结果
+    分析职位
     
     Args:
-        run: 代理运行实例
-        message: 要发送的消息
-        expected_tool_name: 期望调用的工具名称
+        request: 职位分析请求
         
     Returns:
-        Dict: 包含执行结果的字典
+        Dict: 职位分析结果
     """
-    # 启动代理运行
-    await run.send_message(message)
-    
-    # 等待代理完成
-    while run.status not in [RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.EXPIRED]:
-        try:
-            response = await run.get_next_response()
-            logger.debug(f"代理响应: {response.content}")
-        except Exception as e:
-            logger.error(f"获取代理响应时出错: {str(e)}")
-            break
-        await asyncio.sleep(0.5)
-    
-    if run.status != RunStatus.COMPLETED:
-        logger.error(f"代理运行失败, 状态: {run.status}")
-        return {
-            "success": False,
-            "message": "代理处理失败",
-            "data": {
-                "error": f"代理运行失败: {run.status}"
-            },
-            "error_code": ErrorCode.INTERNAL_ERROR
-        }
-    
-    # 获取工具调用结果
-    result = None
-    for step in run.thread_messages():
-        if getattr(step, "tool_calls", None):
-            for tool_call in step.tool_calls:
-                if tool_call.function.name == expected_tool_name:
-                    result = tool_call.function.output
-    
-    if not result:
-        logger.error(f"未找到工具调用结果: {expected_tool_name}")
-        return {
-            "success": False,
-            "message": "结果解析失败",
-            "data": {"error": "未找到工具调用结果"},
-            "error_code": ErrorCode.INTERNAL_ERROR
-        }
-    
-    return {
-        "success": True,
-        "data": result
-    }
+    try:
+        logger.info(f"开始分析职位, 共{len(request.jobs)}个职位")
+        
+        # 构建分析消息
+        message = f"""
+        请分析以下职位列表：
+        
+        职位列表:
+        {request.jobs}
+        """
+        
+        # 使用Runner运行代理
+        with trace(workflow_name="职位分析"):
+            result = await Runner.run(job_analysis_agent, input=message)
+            
+            if not result or not result.final_output:
+                return {
+                    "success": False,
+                    "message": "职位分析失败",
+                    "data": {"error": "未获取到分析结果"},
+                    "error_code": "ANALYSIS_FAILED"
+                }
+            
+            # 获取分析结果
+            analysis_output = result.final_output_as(JobAnalysisOutput)
+            
+            return {
+                "success": True,
+                "data": analysis_output.dict()
+            }
+            
+    except Exception as e:
+        logger.error(f"分析职位时出错: {str(e)}")
+        return _handle_exception(e, "分析职位时出错")
 
 def _handle_exception(exception: Exception, context: str) -> Dict[str, Any]:
     """
@@ -648,19 +787,19 @@ def _handle_exception(exception: Exception, context: str) -> Dict[str, Any]:
             "success": False,
             "message": "API调用错误",
             "data": {"error": str(exception)},
-            "error_code": ErrorCode.API_ERROR
+            "error_code": "API_ERROR"
         }
     elif isinstance(exception, ValidationError):
         return {
             "success": False,
             "message": "数据验证错误",
             "data": {"error": str(exception)},
-            "error_code": ErrorCode.VALIDATION_ERROR
+            "error_code": "VALIDATION_ERROR"
         }
     else:
         return {
             "success": False,
             "message": "服务器内部错误",
             "data": {"error": str(exception)},
-            "error_code": ErrorCode.INTERNAL_ERROR
+            "error_code": "INTERNAL_ERROR"
         }

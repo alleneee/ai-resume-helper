@@ -6,15 +6,43 @@ import asyncio
 import logging
 from pydantic import BaseModel, Field
 
-from agents import Agent, Runner, function_tool, RunStatus
+from agents import Agent, Runner, function_tool, RunStatus, AgentHooks, RunContextWrapper, Tool, trace, handoff
 from agents.run import Run
 from agents.model_settings import ModelSettings
 
-from models.agent import ResumeOptimizationResult, ResumeOptimizationRequest
+from models.agent import ResumeOptimizationResult, ResumeOptimizationRequest, ResumeOptimizeRequest, ResumeOptimizeResponse
 from utils.response import ErrorCode
 
 # 配置日志
 logger = logging.getLogger(__name__)
+
+# 定义代理钩子
+class ResumeAgentHooks(AgentHooks):
+    """简历代理生命周期钩子"""
+    
+    def __init__(self, display_name: str):
+        self.event_counter = 0
+        self.display_name = display_name
+    
+    async def on_start(self, context: RunContextWrapper, agent: Agent) -> None:
+        self.event_counter += 1
+        logger.info(f"({self.display_name}) {self.event_counter}: 代理 {agent.name} 开始运行")
+    
+    async def on_end(self, context: RunContextWrapper, agent: Agent, output: Any) -> None:
+        self.event_counter += 1
+        logger.info(f"({self.display_name}) {self.event_counter}: 代理 {agent.name} 结束运行，输出: {output}")
+    
+    async def on_handoff(self, context: RunContextWrapper, agent: Agent, source: Agent) -> None:
+        self.event_counter += 1
+        logger.info(f"({self.display_name}) {self.event_counter}: 代理 {source.name} 交接给 {agent.name}")
+    
+    async def on_tool_start(self, context: RunContextWrapper, agent: Agent, tool: Tool) -> None:
+        self.event_counter += 1
+        logger.info(f"({self.display_name}) {self.event_counter}: 代理 {agent.name} 开始使用工具 {tool.name}")
+    
+    async def on_tool_end(self, context: RunContextWrapper, agent: Agent, tool: Tool, result: str) -> None:
+        self.event_counter += 1
+        logger.info(f"({self.display_name}) {self.event_counter}: 代理 {agent.name} 结束使用工具 {tool.name}，结果: {result}")
 
 # 定义工具输入/输出模型
 class ResumeAnalysisInput(BaseModel):
@@ -30,10 +58,13 @@ class ResumeOptimizationInput(BaseModel):
     resume_content: str = Field(..., description="原始简历内容")
     job_description: str = Field(..., description="目标职位描述")
     focus_areas: Optional[List[str]] = Field(None, description="需要重点关注的领域或技能")
+    job_analysis: Optional[Dict[str, Any]] = Field(None, description="职位分析结果，包含共同要求、关键技能等")
 
 class ResumeOptimizationOutput(BaseModel):
     optimized_content: str = Field(..., description="优化后的简历内容")
     suggestions: List[str] = Field(..., description="改进建议")
+    matched_skills: Optional[List[str]] = Field(None, description="与职位匹配的技能")
+    missing_skills: Optional[List[str]] = Field(None, description="缺失的技能")
 
 # 简历分析工具
 @function_tool
@@ -69,29 +100,72 @@ def analyze_resume(resume_content: str) -> ResumeAnalysisOutput:
 def optimize_resume(
     resume_content: str, 
     job_description: str, 
-    focus_areas: Optional[List[str]] = None
+    focus_areas: Optional[List[str]] = None,
+    job_analysis: Optional[Dict[str, Any]] = None
 ) -> ResumeOptimizationOutput:
     """
-    根据职位描述和关注点优化简历内容
+    根据职位描述、关注点和职位分析结果优化简历内容
     
     Args:
         resume_content: 原始简历内容
         job_description: 目标职位描述
         focus_areas: 需要重点关注的领域或技能
+        job_analysis: 职位分析结果，包含共同要求、关键技能等
         
     Returns:
         ResumeOptimizationOutput: 优化结果，包含优化后的内容和改进建议
     """
     logger.debug("调用简历优化工具")
     focus_str = "、".join(focus_areas) if focus_areas else "无特定关注点"
+    
+    # 提取职位分析中的关键技能（如果有）
+    key_skills = []
+    if job_analysis and "key_skills" in job_analysis:
+        key_skills = list(job_analysis["key_skills"].keys())
+    
+    # 提取职位分析中的共同要求（如果有）
+    common_requirements = []
+    if job_analysis and "common_requirements" in job_analysis:
+        common_requirements = job_analysis["common_requirements"]
+    
+    # 生成优化建议
+    suggestions = []
+    
+    # 基于职位描述的建议
+    suggestions.append(f"添加更多与{job_description[:30]}...相关的关键词")
+    suggestions.append("更具体地描述项目成果")
+    
+    # 基于关注点的建议
+    if focus_areas:
+        suggestions.append(f"突出与{focus_str}相关的技能")
+    
+    # 基于职位分析的建议
+    if key_skills:
+        suggestions.append(f"重点突出以下技能：{', '.join(key_skills[:5])}")
+    
+    if common_requirements:
+        suggestions.append(f"确保简历涵盖这些共同要求：{', '.join(common_requirements[:3])}")
+    
+    # 模拟匹配的技能和缺失的技能（实际应用中应该基于真实分析）
+    matched_skills = ["Python", "JavaScript", "React"]
+    missing_skills = ["Docker", "Kubernetes", "AWS"]
+    
+    if job_analysis and "key_skills" in job_analysis:
+        # 假设简历中包含这些技能（实际应用中需要真实分析）
+        resume_skills = ["Python", "JavaScript", "React", "FastAPI", "SQL"]
+        
+        # 找出匹配的技能
+        matched_skills = [skill for skill in resume_skills if skill in key_skills]
+        
+        # 找出缺失的技能
+        missing_skills = [skill for skill in key_skills if skill not in resume_skills][:5]
+    
     # 注意：这里只是一个示例，真实场景中这部分逻辑可能需要更复杂的实现
     return ResumeOptimizationOutput(
-        optimized_content=f"优化后的简历内容...\n根据职位描述突出了相关技能和经验",
-        suggestions=[
-            f"添加更多与{job_description}相关的关键词",
-            "更具体地描述项目成果",
-            f"突出与{focus_str}相关的技能"
-        ]
+        optimized_content=f"优化后的简历内容...\n根据职位描述和分析结果突出了相关技能和经验",
+        suggestions=suggestions,
+        matched_skills=matched_skills,
+        missing_skills=missing_skills
     )
 
 # 创建简历分析代理
@@ -109,6 +183,8 @@ resume_analysis_agent = Agent(
     提供简明扼要但有价值的分析结果，帮助求职者理解自己简历的优劣势。
     """,
     tools=[analyze_resume],
+    hooks=ResumeAgentHooks(display_name="简历分析代理"),
+    output_type=ResumeAnalysisOutput,
     model_settings=ModelSettings(temperature=0.2)
 )
 
@@ -124,16 +200,21 @@ resume_optimization_agent = Agent(
     3. 使用行业关键词，提高ATS筛选通过率
     4. 保持简洁专业的表达方式
     5. 调整内容顺序，将最相关的经验放在前面
+    6. 如果有职位分析结果，利用其中的共同要求和关键技能进行优化
     
     提供优化后的简历内容和具体改进建议，帮助求职者针对特定职位优化简历。
     """,
     tools=[analyze_resume, optimize_resume],
-    model_settings=ModelSettings(temperature=0.3)
+    hooks=ResumeAgentHooks(display_name="简历优化代理"),
+    output_type=ResumeOptimizationOutput,
+    model_settings=ModelSettings(temperature=0.3),
+    handoffs=[handoff(resume_analysis_agent, description="需要详细分析简历")]
 )
 
-async def optimize_resume(
-    request: ResumeOptimizationRequest,
+async def optimize_resume_handler(
+    request: ResumeOptimizeRequest,
     resume_content: str,
+    job_analysis: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     优化简历内容
@@ -141,6 +222,7 @@ async def optimize_resume(
     Args:
         request: 简历优化请求
         resume_content: 原始简历内容
+        job_analysis: 职位分析结果（可选）
         
     Returns:
         Dict: 优化结果包含原始内容、优化后内容、改进建议和关键词
@@ -148,100 +230,67 @@ async def optimize_resume(
     try:
         logger.info(f"开始进行简历优化, 简历ID: {request.resume_id}")
         
-        # 创建代理运行
-        run = resume_optimization_agent.create_run()
-        
-        # 启动代理运行
+        # 构建优化消息
         focus_areas_text = f"\n优化重点关注领域: {', '.join(request.focus_areas)}" if request.focus_areas else ""
+        job_analysis_text = ""
         
-        await run.send_message(
-            f"""
-            请分析并优化以下简历内容，针对这个职位描述：
-            
-            职位描述：
-            {request.job_description}
-            
-            简历内容：
-            {resume_content}
-            {focus_areas_text}
+        if job_analysis:
+            job_analysis_text = f"""
+            \n职位分析结果:
+            - 共同要求: {', '.join(job_analysis.get('common_requirements', [])[:5])}
+            - 关键技能: {', '.join(list(job_analysis.get('key_skills', {}).keys())[:5])}
+            - 经验要求: {', '.join([f"{k}: {v}" for k, v in job_analysis.get('experience_requirements', {}).items()][:3])}
+            - 学历要求: {', '.join([f"{k}: {v}" for k, v in job_analysis.get('education_requirements', {}).items()][:3])}
             """
-        )
         
-        # 处理代理响应
-        optimization_result = None
+        message = f"""
+        请分析并优化以下简历内容，针对这个职位描述：
         
-        # 等待代理完成并处理响应
-        while True:
-            try:
-                response = await run.get_next_response()
-                logger.debug(f"代理响应类型: {type(response)}")
-                
-                # 处理工具调用
-                if hasattr(response, 'tool_calls') and response.tool_calls:
-                    for tool_call in response.tool_calls:
-                        if tool_call.function.name == "optimize_resume":
-                            output = tool_call.function.output
-                            if isinstance(output, dict):
-                                optimization_result = output
-                
-                # 检查运行状态
-                if run.status in [RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.EXPIRED]:
-                    break
-                    
-            except Exception as e:
-                logger.error(f"获取代理响应时出错: {str(e)}")
-                break
+        职位描述：
+        {request.job_description}
+        
+        简历内容：
+        {resume_content}
+        {focus_areas_text}
+        {job_analysis_text}
+        """
+        
+        # 使用Runner运行代理
+        with trace(workflow_name="简历优化"):
+            result = await Runner.run(
+                resume_optimization_agent, 
+                input=message
+            )
             
-            # 短暂等待避免过快轮询
-            await asyncio.sleep(0.5)
-        
-        if run.status != RunStatus.COMPLETED:
-            logger.error(f"简历优化失败, 状态: {run.status}")
+            if not result or not result.final_output:
+                return {
+                    "success": False,
+                    "message": "简历优化失败",
+                    "data": {"error": "未获取到优化结果"},
+                    "error_code": "OPTIMIZATION_FAILED"
+                }
+            
+            # 获取优化结果
+            optimization_output = result.final_output_as(ResumeOptimizationOutput)
+            
+            # 创建优化结果
+            optimization_result = ResumeOptimizeResponse(
+                resume_id=request.resume_id,
+                original_content=resume_content,
+                optimized_content=optimization_output.optimized_content,
+                suggestions=optimization_output.suggestions,
+                matched_skills=optimization_output.matched_skills or [],
+                missing_skills=optimization_output.missing_skills or []
+            )
+            
             return {
-                "success": False,
-                "message": "简历优化处理失败",
-                "data": {
-                    "error": f"代理运行失败: {run.status}"
-                },
-                "error_code": ErrorCode.INTERNAL_ERROR
+                "success": True,
+                "data": optimization_result.dict()
             }
-        
-        # 如果没有从工具调用中获取结果，尝试从最终输出中解析
-        if not optimization_result:
-            # 获取代理产生的最终文本输出
-            final_message = run.final_output
-            logger.debug(f"最终输出: {final_message}")
-            
-            # 构建基本结果
-            optimization_result = {
-                "optimized_content": "无法从代理响应中提取优化内容",
-                "suggestions": ["未能生成有效的优化建议"]
-            }
-        
-        # 整合分析结果和优化内容
-        result = ResumeOptimizationResult(
-            original_content=resume_content,
-            optimized_content=optimization_result.get("optimized_content", "无法生成优化内容"),
-            suggestions=optimization_result.get("suggestions", ["无优化建议"]),
-            keywords=request.keywords or ["无关键词提取"]
-        )
-        
-        logger.info(f"简历优化完成, 简历ID: {request.resume_id}")
-        
-        return {
-            "success": True,
-            "message": "简历优化成功",
-            "data": result
-        }
-        
+    
     except Exception as e:
-        logger.exception(f"简历优化过程中发生错误: {str(e)}")
-        return {
-            "success": False,
-            "message": f"简历优化失败: {str(e)}",
-            "data": None,
-            "error_code": ErrorCode.INTERNAL_ERROR
-        }
+        logger.error(f"优化简历时出错: {str(e)}")
+        return _handle_exception(e, "优化简历时出错")
 
 async def analyze_resume(
     resume_content: str,
@@ -256,86 +305,84 @@ async def analyze_resume(
         Dict: 分析结果包含优势、劣势、关键词和技能缺口
     """
     try:
-        logger.info("开始进行简历分析")
+        logger.info("开始分析简历内容")
         
-        # 创建代理运行
-        run = resume_analysis_agent.create_run()
+        # 构建分析消息
+        message = f"""
+        请分析以下简历内容，提取优势、劣势、关键词和技能缺口：
         
-        # 启动代理运行
-        await run.send_message(
-            f"""
-            请分析以下简历内容，提取优势、劣势、关键词和技能缺口：
+        简历内容：
+        {resume_content}
+        """
+        
+        # 使用Runner运行代理
+        with trace(workflow_name="简历分析"):
+            result = await Runner.run(
+                resume_analysis_agent, 
+                input=message
+            )
             
-            {resume_content}
-            """
-        )
-        
-        # 处理代理响应
-        analysis_result = None
-        
-        # 等待代理完成并处理响应
-        while True:
-            try:
-                response = await run.get_next_response()
-                logger.debug(f"代理响应类型: {type(response)}")
-                
-                # 处理工具调用
-                if hasattr(response, 'tool_calls') and response.tool_calls:
-                    for tool_call in response.tool_calls:
-                        if tool_call.function.name == "analyze_resume":
-                            output = tool_call.function.output
-                            if isinstance(output, dict):
-                                analysis_result = output
-                
-                # 检查运行状态
-                if run.status in [RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.EXPIRED]:
-                    break
-                    
-            except Exception as e:
-                logger.error(f"获取代理响应时出错: {str(e)}")
-                break
+            if not result or not result.final_output:
+                return {
+                    "success": False,
+                    "message": "简历分析失败",
+                    "data": {"error": "未获取到分析结果"},
+                    "error_code": "ANALYSIS_FAILED"
+                }
             
-            # 短暂等待避免过快轮询
-            await asyncio.sleep(0.5)
-        
-        if run.status != RunStatus.COMPLETED:
-            logger.error(f"简历分析失败, 状态: {run.status}")
+            # 获取分析结果
+            analysis_output = result.final_output_as(ResumeAnalysisOutput)
+            
             return {
-                "success": False,
-                "message": "简历分析处理失败",
+                "success": True,
                 "data": {
-                    "error": f"代理运行失败: {run.status}"
-                },
-                "error_code": ErrorCode.INTERNAL_ERROR
+                    "strengths": analysis_output.strengths,
+                    "weaknesses": analysis_output.weaknesses,
+                    "keywords": analysis_output.keywords,
+                    "skill_gaps": analysis_output.skill_gaps
+                }
             }
-        
-        # 如果没有从工具调用中获取结果，尝试从最终输出中解析
-        if not analysis_result:
-            # 获取代理产生的最终文本输出
-            final_message = run.final_output
-            logger.debug(f"最终输出: {final_message}")
-            
-            # 构建基本结果
-            analysis_result = {
-                "strengths": ["未能从代理中提取优势"],
-                "weaknesses": ["未能从代理中提取劣势"],
-                "keywords": ["未能从代理中提取关键词"],
-                "skill_gaps": ["未能从代理中提取技能缺口"]
-            }
-        
-        logger.info("简历分析完成")
-        
-        return {
-            "success": True,
-            "message": "简历分析成功",
-            "data": analysis_result
-        }
-        
+    
     except Exception as e:
-        logger.exception(f"简历分析过程中发生错误: {str(e)}")
+        logger.error(f"分析简历时出错: {str(e)}")
+        return _handle_exception(e, "分析简历时出错")
+
+def _handle_exception(exception: Exception, context: str) -> Dict[str, Any]:
+    """
+    处理异常并返回标准化的错误响应
+    
+    Args:
+        exception: 异常对象
+        context: 错误上下文描述
+        
+    Returns:
+        Dict: 标准化的错误响应
+    """
+    import traceback
+    from openai import BadRequestError
+    from pydantic import ValidationError
+    
+    logger.error(f"{context}: {str(exception)}")
+    logger.debug(traceback.format_exc())
+    
+    if isinstance(exception, BadRequestError):
         return {
             "success": False,
-            "message": f"简历分析失败: {str(e)}",
-            "data": None,
-            "error_code": ErrorCode.INTERNAL_ERROR
+            "message": "API调用错误",
+            "data": {"error": str(exception)},
+            "error_code": "API_ERROR"
+        }
+    elif isinstance(exception, ValidationError):
+        return {
+            "success": False,
+            "message": "数据验证错误",
+            "data": {"error": str(exception)},
+            "error_code": "VALIDATION_ERROR"
+        }
+    else:
+        return {
+            "success": False,
+            "message": "服务器内部错误",
+            "data": {"error": str(exception)},
+            "error_code": "INTERNAL_ERROR"
         }
