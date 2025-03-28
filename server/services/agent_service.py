@@ -22,7 +22,8 @@ from langchain_openai import ChatOpenAI
 from browser_use import Agent as BrowserAgent, ActionResult, Controller
 from browser_use.browser.browser import Browser, BrowserConfig
 from pydantic import BaseModel, Field, HttpUrl
-from server.services.platforms.platform_factory import PlatformFactory
+from services.browser_scraper_service import BrowserScraperService
+from services.platforms.platform_factory import PlatformFactory
 
 # 加载环境变量
 load_dotenv()
@@ -166,6 +167,44 @@ class LLMFactory:
 class BrowserScraperService:
     """浏览器爬虫服务，处理所有与browser-use相关的操作"""
     
+    _instance = None
+    
+    @classmethod
+    def get_instance(cls, 
+                    controller: Controller = None,
+                    browser_config: Optional[BrowserConfig] = None,
+                    llm_factory: Optional[LLMFactory] = None,
+                    api_key: Optional[str] = None,
+                    api_base_url: Optional[str] = None,
+                    model: str = "gpt-4o-mini",
+                    browser_pool_size: int = 3):
+        """
+        获取浏览器爬虫服务单例
+        
+        Args:
+            controller: browser-use控制器，默认使用全局controller
+            browser_config: 浏览器配置
+            llm_factory: LLM工厂实例
+            api_key: OpenAI API密钥
+            api_base_url: OpenAI API基础URL
+            model: 模型名称
+            browser_pool_size: 浏览器实例池大小
+            
+        Returns:
+            BrowserScraperService: 浏览器爬虫服务单例
+        """
+        if cls._instance is None:
+            cls._instance = cls(
+                controller=controller or globals().get('controller'),
+                browser_config=browser_config,
+                llm_factory=llm_factory,
+                api_key=api_key,
+                api_base_url=api_base_url,
+                model=model,
+                browser_pool_size=browser_pool_size
+            )
+        return cls._instance
+    
     def __init__(
         self, 
         controller: Controller,
@@ -243,72 +282,141 @@ class BrowserScraperService:
     def _create_job_detail_task_template(self) -> str:
         """创建职位详情爬取任务模板"""
         return """
-        任务目标: 爬取职位详情页面并提取结构化信息
+        任务目标: 详细分析职位详情页面并提取完整结构化信息
         
         步骤:
-        1. 访问: {url}
-        2. 提取信息:
+        1. 访问职位详情页面: {url}
+        2. 等待页面完全加载，包括动态内容
+        3. 如有必要，关闭弹窗或接受Cookie提示
+        4. 分析并提取以下核心信息:
            - 职位标题 (title)
            - 公司名称 (company_name)
-           - 工作地点 (location)
+           - 工作地点 (location) - 包括远程选项信息
            - 薪资范围 (salary_range)
+           - 工作类型 (job_type) - 如全职、兼职、合同工等
+           - 发布日期 (posting_date)
+           - 截止日期 (deadline) - 如有
            - 工作经验要求 (experience_level)
            - 学历要求 (education_level)
+           - 所需技能 (required_skills) - 列表形式
            - 公司规模 (company_size)
            - 融资阶段 (funding_stage)
-           - 公司描述 (company_description)
+           - 行业领域 (industry)
+        5. 提取详细描述内容:
            - 职位描述 (job_description)
-        3. 输出格式: JSON
+           - 工作职责 (responsibilities) - 列表形式
+           - 岗位要求 (requirements) - 列表形式
+           - 公司描述 (company_description)
+           - 福利待遇 (benefits) - 列表形式
+        6. 记录应用信息:
+           - 应用流程 (application_process)
+           - 直接申请链接 (application_link)
+           - 联系信息 (contact_info) - 如有
+        7. 输出格式: 结构化JSON对象
         
         注意事项:
         - 尽可能提取所有信息，但不要捏造不存在的内容
         - 如果找不到某项信息，对应字段返回null
-        - 确保JSON格式正确
-        - 尝试使用特定选择器: .job-title, .company-name, .location, .salary 等
+        - 对于列表类型的字段，提取为数组形式
+        - 确保JSON格式正确，无语法错误
+        - 注意甄别真实信息与广告内容
+        - 尝试使用精确的CSS选择器定位元素: .job-title, .company-name, .location, .salary 等
+        - 如果页面需要登录，尝试找到游客可见的信息部分
         """
     
     def _create_job_search_task_template(self) -> str:
         """创建职位搜索任务模板"""
         return """
-        任务目标: 搜索并提取职位列表信息
+        任务目标: 在招聘网站上搜索并提取符合条件的职位列表信息
         
         步骤:
         1. 访问招聘网站：{url}
-        2. 输入搜索关键词：{keywords}
-        3. 选择地点：{location}
-        4. 应用其他筛选条件（如有）
-        5. 提取搜索结果中的职位信息：
-           - 职位标题
-           - 公司名称
-           - 工作地点
-           - 薪资范围
-           - 职位链接
-        6. 输出格式: JSON数组
+        2. 等待页面完全加载
+        3. 执行搜索操作:
+           a. 输入搜索关键词：{keywords}
+           b. 选择地点：{location}
+           c. 应用经验筛选：{experience_level}（如适用）
+           d. 应用薪资范围筛选：{salary_range}（如适用）
+           e. 应用工作类型筛选：{job_type}（如适用）
+           f. 应用其他相关筛选条件（如有）
+           g. 点击搜索按钮
+        4. 处理搜索结果:
+           a. 等待结果加载完成
+           b. 检查是否有结果，如无结果尝试放宽搜索条件
+           c. 如有分页，确保获取足够的结果页面
+        5. 提取至少{limit}个职位信息（如有），每个职位包括:
+           - 职位标题 (title)
+           - 公司名称 (company_name)
+           - 工作地点 (location) - 注明是否支持远程
+           - 薪资范围 (salary_range)
+           - 工作类型 (job_type)
+           - 发布日期 (posting_date)
+           - 经验要求 (experience_level)
+           - 教育要求 (education_level)
+           - 关键技能要求 (key_skills) - 如有明确列出
+           - 职位简介摘要 (short_description) - 如有
+           - 公司信息摘要 (company_brief)
+           - 职位详情页面链接 (url)
+        6. 评估结果质量:
+           - 对每个职位添加相关度评分 (relevance_score: 1-5)，根据与搜索条件的匹配程度
+           - 标记特别符合条件的优质职位 (is_recommended: true/false)
+        7. 输出格式: 包含所有职位的JSON数组
         
         注意事项:
-        - 尽量获取至少{limit}个结果
-        - 确保JSON格式正确
+        - 优先获取最新发布的职位
+        - 确保所有链接是完整的绝对URL路径
+        - 应对常见反爬措施，如滚动加载更多结果时等待页面元素出现
+        - 处理可能出现的登录提示或Cookie通知
+        - 如果搜索结果过少，可考虑放宽部分筛选条件并记录此调整
+        - 确保输出的JSON格式正确，字段名称统一
         """
     
     def _create_company_info_task_template(self) -> str:
         """创建公司信息爬取任务模板"""
         return """
-        任务目标: 爬取公司信息
+        任务目标: 全面分析公司信息页面并提取详细结构化数据
         
         步骤:
-        1. 访问：{url}
-        2. 提取公司信息：
-           - 公司名称
-           - 公司规模
-           - 融资阶段
-           - 公司描述
-           - 创始人信息
-           - 公司地址
-        3. 输出格式: JSON
+        1. 访问公司页面：{url}
+        2. 等待页面完全加载，包括动态内容
+        3. 如有必要，关闭弹窗或接受Cookie提示
+        4. 提取基本公司信息：
+           - 公司名称 (company_name)
+           - 公司logo URL (logo_url)
+           - 公司官网 (website)
+           - 公司规模 (company_size) - 员工人数范围
+           - 公司类型 (company_type) - 如私企、国企、外企等
+           - 融资阶段 (funding_stage)
+           - 融资信息 (funding_info) - 如有详细轮次和金额
+           - 成立时间 (founded_year)
+           - 行业领域 (industry)
+           - 公司总部 (headquarters)
+           - 办公地点 (office_locations) - 可能有多个
+        5. 提取详细描述内容:
+           - 公司简介 (company_description)
+           - 公司使命/愿景 (mission_statement)
+           - 公司文化 (company_culture)
+           - 产品或服务介绍 (products_services)
+           - 公司发展历程 (company_history)
+        6. 提取领导团队信息:
+           - 创始人信息 (founders) - 姓名和头衔
+           - 高管团队 (executive_team) - 如有列出
+        7. 提取其他相关信息:
+           - 公司福利 (benefits)
+           - 工作环境 (work_environment)
+           - 公司荣誉/奖项 (awards)
+           - 社交媒体链接 (social_media)
+           - 招聘相关政策 (hiring_policy)
+        8. 输出格式: 结构化JSON对象
         
         注意事项:
-        - 确保信息准确性
+        - 尽可能提取所有信息，但不要捏造不存在的内容
         - 如果找不到某项信息，对应字段返回null
+        - 区分公司自述信息与客观数据
+        - 注意识别和提取结构化数据，如公司规模通常有特定格式
+        - 如可能，验证关键信息的准确性（如通过多个页面部分）
+        - 如果页面需要登录，尝试获取游客可见的部分信息
+        - 确保JSON格式正确，字段命名统一
         """
     
     def _create_job_detail_task(self, url: str) -> str:
@@ -589,769 +697,9 @@ class AgentService:
     
     _instance = None
     
-    def __init__(self, settings: Optional[Settings] = None):
-        """
-        初始化代理服务
-        
-        Args:
-            settings: 应用配置，如果为None则使用全局配置
-        """
-        # 使用传入的settings或获取全局settings
-        self.settings = settings or get_settings()
-        
-        # 从settings获取API配置
-        self.api_key = self.settings.OPENAI_API_KEY
-        self.api_base_url = self.settings.OPENAI_API_BASE_URL
-        self.model = self.settings.OPENAI_MODEL
-        self.job_search_api_key = self.settings.JOB_SEARCH_API_KEY
-        self.job_search_api_url = self.settings.JOB_SEARCH_API_URL
-        
-        # Firecrawl API配置
-        self.firecrawl_api_key = self.settings.FIRECRAWL_API_KEY
-        self.firecrawl_app = None
-        if self.firecrawl_api_key:
-            self.firecrawl_app = FirecrawlApp(api_key=self.firecrawl_api_key)
-        
-        # 创建LLM工厂
-        self.llm_factory = LLMFactory()
-        
-        # 创建浏览器爬虫服务
-        self.browser_scraper = BrowserScraperService(
-            controller=controller,
-            api_key=self.api_key,
-            api_base_url=self.api_base_url,
-            model=self.model
-        )
-        
-        # 创建平台工厂
-        self.platform_factory = PlatformFactory(browser_scraper=self.browser_scraper)
-        
-        # 验证配置
-        if not self.api_key:
-            logger.warning("OPENAI_API_KEY 环境变量未设置")
-        
-        if not self.job_search_api_key:
-            logger.warning("JOB_SEARCH_API_KEY 环境变量未设置")
-            
-        if not self.firecrawl_api_key:
-            logger.warning("FIRECRAWL_API_KEY 环境变量未设置，将使用browser-use爬取方法")
-
-    @classmethod
-    @lru_cache()
-    def get_instance(cls, settings: Optional[Settings] = None) -> 'AgentService':
-        """
-        获取AgentService单例实例
-        
-        使用lru_cache确保单例模式下的性能
-        
-        Args:
-            settings: 应用配置，如果为None则使用全局配置
-            
-        Returns:
-            AgentService实例
-        """
-        if cls._instance is None:
-            cls._instance = cls(settings)
-        return cls._instance
-    
-    async def search_jobs(
-        self,
-        keywords: List[str],
-        location: Optional[str] = None,
-        job_type: Optional[str] = None,
-        experience_level: Optional[str] = None,
-        education_level: Optional[str] = None,
-        salary_min: Optional[int] = None,
-        salary_max: Optional[int] = None,
-        company_size: Optional[str] = None,
-        funding_stage: Optional[str] = None,
-        page: int = 1,
-        limit: int = 10,
-        user_id: str = None,
-        db: Optional[AsyncIOMotorDatabase] = None,
-        platforms: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
-        """
-        搜索职位
-        
-        Args:
-            keywords: 关键词
-            location: 地点
-            job_type: 职位类型
-            experience_level: 经验水平
-            education_level: 学历要求
-            salary_min: 最低薪资
-            salary_max: 最高薪资
-            company_size: 公司规模
-            funding_stage: 融资阶段
-            page: 页码
-            limit: 每页数量
-            user_id: 用户ID
-            db: MongoDB数据库连接
-            platforms: 要搜索的平台列表，如果为None则使用所有支持的平台
-            
-        Returns:
-            搜索结果，包含职位列表和分页信息
-        """
-        try:
-            logger.info(f"开始搜索职位: 关键词: {keywords}")
-            
-            # 准备筛选条件
-            filters = {
-                "job_type": job_type,
-                "experience_level": experience_level,
-                "education_level": education_level,
-                "salary_min": salary_min,
-                "salary_max": salary_max,
-                "company_size": company_size,
-                "funding_stage": funding_stage,
-                "page": page,
-                "limit": limit
-            }
-            
-            # 首先尝试使用平台工厂搜索
-            all_jobs = []
-            
-            if platforms:
-                # 在指定的平台上搜索
-                for platform_name in platforms:
-                    platform = self.platform_factory.get_platform(platform_name)
-                    if not platform:
-                        continue
-                        
-                    try:
-                        logger.info(f"在平台 {platform_name} 上搜索职位")
-                        platform_jobs = await platform.search_jobs(
-                            keywords=keywords,
-                            location=location,
-                            **filters
-                        )
-                        all_jobs.extend(platform_jobs)
-                    except Exception as e:
-                        logger.error(f"平台 {platform_name} 搜索失败: {str(e)}")
-            else:
-                # 获取所有支持的平台实例
-                supported_platforms = self.platform_factory.get_all_platforms()
-                
-                # 在所有平台上并行搜索
-                if supported_platforms:
-                    search_tasks = []
-                    for platform in supported_platforms:
-                        task = asyncio.create_task(platform.search_jobs(
-                            keywords=keywords,
-                            location=location,
-                            **filters
-                        ))
-                        search_tasks.append(task)
-                    
-                    # 等待所有搜索任务完成
-                    if search_tasks:
-                        results = await asyncio.gather(*search_tasks, return_exceptions=True)
-                        
-                        # 处理结果
-                        for i, result in enumerate(results):
-                            if isinstance(result, Exception):
-                                platform_name = supported_platforms[i].platform_name
-                                logger.error(f"平台 {platform_name} 搜索失败: {str(result)}")
-                            else:
-                                all_jobs.extend(result)
-            
-            # 如果平台搜索没有返回结果，尝试使用API
-            if not all_jobs:
-                logger.info("平台搜索未返回结果，尝试使用API")
-                api_jobs = await self._search_jobs_api(
-                    keywords=keywords,
-                    location=location,
-                    job_type=job_type,
-                    experience_level=experience_level,
-                    education_level=education_level,
-                    salary_min=salary_min,
-                    salary_max=salary_max,
-                    company_size=company_size,
-                    funding_stage=funding_stage,
-                    page=page,
-                    limit=limit
-                )
-                all_jobs.extend(api_jobs)
-            
-            # 如果提供了数据库连接，则存储爬取的岗位信息
-            if db and all_jobs and user_id:
-                await self._store_jobs_in_db(all_jobs, user_id, db)
-            
-            # 分页处理 (简单实现，实际环境可能需要更复杂的逻辑)
-            start_idx = (page - 1) * limit
-            end_idx = start_idx + limit
-            paginated_jobs = all_jobs[start_idx:end_idx] if start_idx < len(all_jobs) else []
-            
-            # 计算总数
-            total = len(all_jobs)
-            
-            # 构建返回结果
-            result = {
-                "jobs": paginated_jobs,
-                "total": total,
-                "page": page,
-                "limit": limit
-            }
-            
-            logger.info(f"职位搜索完成: 关键词: {keywords} - 找到 {total} 个职位")
-            return result
-            
-        except Exception as e:
-            logger.error(f"职位搜索失败: {str(e)}")
-            raise
-    
-    async def _store_jobs_in_db(
-        self, 
-        jobs: List[Dict[str, Any]], 
-        user_id: str, 
-        db: AsyncIOMotorDatabase
-    ) -> None:
-        """
-        将职位信息存储到数据库
-        
-        Args:
-            jobs: 职位列表
-            user_id: 用户ID
-            db: MongoDB数据库连接
-        """
-        try:
-            # 创建批量操作列表
-            operations = []
-            for job in jobs:
-                # 创建查询条件（使用职位ID和URL作为唯一标识）
-                query = {
-                    "$or": [
-                        {"id": job.get("id")},
-                        {"url": job.get("url")}
-                    ]
-                }
-                
-                # 添加用户ID和时间戳
-                job_data = job.copy()
-                job_data["user_id"] = user_id
-                job_data["created_at"] = datetime.utcnow()
-                job_data["updated_at"] = datetime.utcnow()
-                
-                # 创建upsert操作
-                operations.append({
-                    "update_one": {
-                        "filter": query,
-                        "update": {"$set": job_data},
-                        "upsert": True
-                    }
-                })
-            
-            # 如果有操作，执行批量写入
-            if operations:
-                result = await db.job_listings.bulk_write(operations)
-                logger.info(f"已存储 {len(operations)} 个职位信息到数据库")
-        
-        except Exception as e:
-            logger.error(f"存储职位信息到数据库失败: {str(e)}")
-    
-    async def _search_jobs_api(
-        self,
-        keywords: List[str],
-        location: Optional[str] = None,
-        job_type: Optional[str] = None,
-        experience_level: Optional[str] = None,
-        education_level: Optional[str] = None,
-        salary_min: Optional[int] = None,
-        salary_max: Optional[int] = None,
-        company_size: Optional[str] = None,
-        funding_stage: Optional[str] = None,
-        page: int = 1,
-        limit: int = 10
-    ) -> List[Dict[str, Any]]:
-        """
-        调用职位搜索API
-        
-        Args:
-            keywords: 关键词
-            location: 地点
-            job_type: 职位类型
-            experience_level: 经验水平
-            education_level: 学历要求
-            salary_min: 最低薪资
-            salary_max: 最高薪资
-            company_size: 公司规模
-            funding_stage: 融资阶段
-            page: 页码
-            limit: 每页数量
-            
-        Returns:
-            职位列表
-        """
-        logger.debug(f"调用职位搜索API: 关键词: {keywords}")
-        
-        # 构建查询参数
-        params = {
-            "keywords": ",".join(keywords),
-            "limit": limit,
-            "page": page
-        }
-        
-        # 添加可选参数
-        optional_params = {
-            "location": location,
-            "job_type": job_type,
-            "experience_level": experience_level,
-            "education_level": education_level,
-            "salary_min": salary_min,
-            "salary_max": salary_max,
-            "company_size": company_size,
-            "funding_stage": funding_stage
-        }
-        
-        # 过滤掉None值，保留有效参数
-        params.update({k: v for k, v in optional_params.items() if v is not None})
-        
-        # 尝试从API获取数据
-        try:
-            # 使用重试机制调用API
-            for attempt in range(MAX_RETRIES):
-                try:
-                    async with get_http_client() as client:
-                        response = await client.get(
-                            f"{self.job_search_api_url}/search",
-                            headers={
-                                "Authorization": f"Bearer {self.job_search_api_key}",
-                                "Content-Type": "application/json"
-                            },
-                            params=params
-                        )
-                        
-                        response.raise_for_status()
-                        result = response.json()
-                        
-                        # 返回职位列表
-                        jobs = result.get("jobs", [])
-                        
-                        # 如果API返回了职位列表，则爬取每个职位的详细信息
-                        if jobs:
-                            # 并行爬取详细信息
-                            detailed_jobs = await self._scrape_job_details(jobs)
-                            return detailed_jobs
-                        
-                        return jobs
-                
-                except (httpx.RequestError, httpx.HTTPStatusError) as e:
-                    # 如果不是最后一次尝试，则等待后重试
-                    if attempt < MAX_RETRIES - 1:
-                        retry_delay = RETRY_BACKOFF * (2 ** attempt)  # 指数退避
-                        logger.warning(f"API请求失败，{retry_delay}秒后重试 ({attempt+1}/{MAX_RETRIES}): {str(e)}")
-                        await asyncio.sleep(retry_delay)
-                    else:
-                        # 最后一次尝试失败，记录错误并切换到备用方法
-                        logger.error(f"API请求重试次数已达上限，切换到网络爬取: {str(e)}")
-                        raise
-            
-            # 如果所有重试都失败，尝试直接爬取职位信息
-            return await self._scrape_jobs_from_web(
-                keywords=keywords,
-                location=location,
-                job_type=job_type,
-                experience_level=experience_level,
-                education_level=education_level,
-                salary_min=salary_min,
-                salary_max=salary_max,
-                company_size=company_size,
-                funding_stage=funding_stage,
-                limit=limit
-            )
-                
-        except Exception as e:
-            logger.error(f"职位搜索API调用失败: {str(e)}")
-            # 如果API调用失败，返回模拟数据
-            return await self._get_mock_jobs(
-                keywords=keywords, 
-                location=location, 
-                experience_level=experience_level,
-                education_level=education_level,
-                company_size=company_size,
-                funding_stage=funding_stage,
-                limit=limit
-            )
-    
-    async def _scrape_job_details(self, jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        爬取职位详细信息
-        
-        Args:
-            jobs: 职位列表
-            
-        Returns:
-            带有详细信息的职位列表
-        """
-        try:
-            detailed_jobs = []
-            
-            # 创建任务，并控制并发数
-            concurrency = min(5, len(jobs) // 2)  # 动态计算并发数
-            semaphore = asyncio.Semaphore(concurrency)  
-            
-            async def fetch_with_semaphore(job: Dict[str, Any]) -> Dict[str, Any]:
-                async with semaphore:
-                    return await self.browser_scraper.scrape_job_detail(job)
-            
-            # 创建爬取任务
-            tasks = []
-            for job in jobs:
-                if job.get("url"):
-                    task = asyncio.create_task(fetch_with_semaphore(job))
-                    tasks.append(task)
-                else:
-                    detailed_jobs.append(job)
-            
-            # 等待所有任务完成
-            if tasks:
-                # 超时设置，避免单个任务阻塞太久
-                completed, pending = await asyncio.wait(
-                    tasks, 
-                    timeout=60.0,  # 设置总体超时时间
-                    return_when=asyncio.ALL_COMPLETED
-                )
-                
-                # 取消所有未完成的任务
-                for task in pending:
-                    task.cancel()
-                
-                # 处理完成的任务结果
-                for task in completed:
-                    try:
-                        result = task.result()
-                        if result:
-                            detailed_jobs.append(result)
-                    except Exception as e:
-                        logger.error(f"爬取职位详情任务失败: {str(e)}")
-            
-            return detailed_jobs
-            
-        except Exception as e:
-            logger.error(f"爬取职位详情失败: {str(e)}")
-            return jobs
-    
-    async def _scrape_jobs_from_web(
-        self,
-        keywords: List[str],
-        location: Optional[str] = None,
-        job_type: Optional[str] = None,
-        experience_level: Optional[str] = None,
-        education_level: Optional[str] = None,
-        salary_min: Optional[int] = None,
-        salary_max: Optional[int] = None,
-        company_size: Optional[str] = None,
-        funding_stage: Optional[str] = None,
-        limit: int = 10
-    ) -> List[Dict[str, Any]]:
-        """
-        从网页爬取职位信息
-        
-        Args:
-            keywords: 关键词
-            location: 地点
-            job_type: 职位类型
-            experience_level: 经验水平
-            education_level: 学历要求
-            salary_min: 最低薪资
-            salary_max: 最高薪资
-            company_size: 公司规模
-            funding_stage: 融资阶段
-            limit: 返回数量
-            
-        Returns:
-            职位列表
-        """
-        try:
-            logger.info(f"从网页爬取职位信息: 关键词: {keywords}")
-            
-            # 这里实现从主流招聘网站爬取职位信息的逻辑
-            # 由于爬虫实现较为复杂，这里仅提供一个简化版本
-            
-            # 模拟爬取结果
-            jobs = await self._get_mock_jobs(
-                keywords=keywords, 
-                location=location, 
-                experience_level=experience_level,
-                education_level=education_level,
-                company_size=company_size,
-                funding_stage=funding_stage,
-                limit=limit
-            )
-            
-            # 添加爬取标记
-            for job in jobs:
-                job["scraped"] = True
-                job["scrape_time"] = datetime.utcnow().isoformat()
-            
-            return jobs
-            
-        except Exception as e:
-            logger.error(f"从网页爬取职位信息失败: {str(e)}")
-            # 如果爬取失败，返回模拟数据
-            return await self._get_mock_jobs(
-                keywords=keywords, 
-                location=location, 
-                experience_level=experience_level,
-                education_level=education_level,
-                company_size=company_size,
-                funding_stage=funding_stage,
-                limit=limit
-            )
-    
-    async def _get_mock_jobs(
-        self, 
-        keywords: List[str], 
-        location: Optional[str] = None,
-        experience_level: Optional[str] = None,
-        education_level: Optional[str] = None,
-        company_size: Optional[str] = None,
-        funding_stage: Optional[str] = None,
-        limit: int = 10
-    ) -> List[Dict[str, Any]]:
-        """
-        获取模拟职位数据（当API调用失败时使用）
-        
-        Args:
-            keywords: 关键词
-            location: 地点
-            experience_level: 经验水平
-            education_level: 学历要求
-            company_size: 公司规模
-            funding_stage: 融资阶段
-            limit: 返回数量
-            
-        Returns:
-            模拟职位列表
-        """
-        logger.warning("使用模拟职位数据")
-        
-        # 经验要求映射
-        experience_mapping = {
-            "entry": "0-1年",
-            "junior": "1-3年",
-            "mid": "3-5年",
-            "senior": "5-10年",
-            "lead": "10年以上",
-            "executive": "高管经验",
-            "any": "不限"
-        }
-        
-        # 学历要求映射
-        education_mapping = {
-            "high_school": "高中及以上",
-            "associate": "大专及以上",
-            "bachelor": "本科及以上",
-            "master": "硕士及以上",
-            "doctorate": "博士及以上",
-            "any": "不限"
-        }
-        
-        # 公司规模映射
-        company_size_mapping = {
-            "startup": "初创公司(<50人)",
-            "small": "小型公司(50-200人)",
-            "medium": "中型公司(201-1000人)",
-            "large": "大型公司(1001-5000人)",
-            "enterprise": "超大型企业(>5000人)",
-            "any": "不限"
-        }
-        
-        # 融资阶段映射
-        funding_stage_mapping = {
-            "bootstrap": "自筹资金",
-            "seed": "种子轮",
-            "series_a": "A轮",
-            "series_b": "B轮",
-            "series_c": "C轮",
-            "series_d_plus": "D轮及以上",
-            "ipo": "已上市",
-            "acquired": "已被收购",
-            "any": "不限"
-        }
-        
-        # 生成模拟职位数据
-        mock_jobs = []
-        for i in range(min(limit, 10)):
-            # 根据提供的条件生成匹配的模拟数据
-            exp_level = experience_mapping.get(experience_level, experience_mapping[["entry", "junior", "mid", "senior", "lead"][i % 5]])
-            edu_level = education_mapping.get(education_level, education_mapping[["associate", "bachelor", "master"][i % 3]])
-            comp_size = company_size_mapping.get(company_size, company_size_mapping[["startup", "small", "medium", "large", "enterprise"][i % 5]])
-            fund_stage = funding_stage_mapping.get(funding_stage, funding_stage_mapping[["seed", "series_a", "series_b", "series_c", "ipo"][i % 5]])
-            
-            job = {
-                "id": f"mock-{i}",
-                "title": f"{keywords[0] if keywords else '软件'}{['工程师', '开发者', '架构师'][i % 3]}",
-                "company": f"模拟公司 {i+1}",
-                "location": location or "上海",
-                "description": f"这是一个模拟职位描述，包含关键词: {', '.join(keywords)}。该职位需要相关技术经验和团队协作能力。",
-                "salary": f"{(i+1)*10}k-{(i+2)*10}k",
-                "job_type": ["全职", "兼职", "合同工"][i % 3],
-                "experience_level": exp_level,
-                "education_level": edu_level,
-                "company_size": comp_size,
-                "funding_stage": fund_stage,
-                "company_description": f"模拟公司{i+1}是一家专注于{', '.join(keywords)}领域的{comp_size}。公司目前处于{fund_stage}融资阶段，拥有优秀的团队和创新的产品。",
-                "url": f"https://example.com/jobs/mock-{i}",
-                "posted_date": datetime.now().strftime("%Y-%m-%d")
-            }
-            
-            mock_jobs.append(job)
-        
-        return mock_jobs
-    
-    async def get_job_details(self, job_id: str, platform: Optional[str] = None) -> Optional[JobDetail]:
-        """
-        获取职位详情信息
-        
-        根据职位ID获取职位的详细信息，优先从数据库查询，如果不存在则尝试从URL爬取
-        
-        Args:
-            job_id: 职位ID或URL
-            platform: 平台名称，如果知道职位来自哪个平台，可以指定
-            
-        Returns:
-            JobDetail|None: 职位详情，如果不存在则返回None
-        """
-        logger.info(f"获取职位详情: job_id={job_id}")
-        
-        try:
-            job_data: Dict[str, Any] = {}
-            
-            # 检查ID是否为URL格式
-            is_url = job_id.startswith(('http://', 'https://'))
-            
-            # 如果指定了平台，直接使用该平台的适配器
-            if platform:
-                platform_instance = self.platform_factory.get_platform(platform)
-                if platform_instance:
-                    logger.info(f"使用平台 {platform} 获取职位详情")
-                    job_data = await platform_instance.get_job_detail(job_id)
-                    if job_data:
-                        return self._convert_to_job_detail(job_data)
-            
-            # 如果是URL但未指定平台，尝试从URL模式判断平台
-            if is_url and not platform:
-                # 根据URL判断平台
-                detected_platform = self._detect_platform_from_url(job_id)
-                if detected_platform:
-                    platform_instance = self.platform_factory.get_platform(detected_platform)
-                    if platform_instance:
-                        logger.info(f"从URL检测到平台 {detected_platform}")
-                        job_data = await platform_instance.get_job_detail(job_id)
-                        if job_data:
-                            return self._convert_to_job_detail(job_data)
-            
-            # 如果仍未获取到数据，使用通用方法
-            if not job_data:
-                # 创建一个最小化的职位信息对象用于爬取
-                job = {
-                    "id": job_id,
-                    "url": job_id if is_url else None
-                }
-                
-                # 使用browser-use爬取详情
-                job_data = await self.browser_scraper.scrape_job_detail(job)
-                if not job_data:
-                    logger.warning(f"爬取职位详情失败: job_id={job_id}")
-                    return None
-                
-                logger.info(f"成功爬取职位详情: job_id={job_id}")
-            
-            # 确保job_data包含id字段
-            if not job_data.get("id"):
-                job_data["id"] = job_id
-                
-            # 包装为Pydantic模型返回
-            return self._convert_to_job_detail(job_data)
-        
-        except Exception as e:
-            logger.error(f"获取职位详情出错: job_id={job_id}, error={str(e)}")
-            return None
-    
-    def _detect_platform_from_url(self, url: str) -> Optional[str]:
-        """
-        从URL检测平台
-        
-        Args:
-            url: 职位URL
-            
-        Returns:
-            平台名称，如果无法检测则返回None
-        """
-        url_patterns = {
-            "boss": ["zhipin.com"],
-            "lagou": ["lagou.com"],
-            "51job": ["51job.com"],
-            "zhilian": ["zhaopin.com"]
-        }
-        
-        for platform, patterns in url_patterns.items():
-            for pattern in patterns:
-                if pattern in url:
-                    return platform
-        
-        return None
-    
-    def _convert_to_job_detail(self, job_data: Dict[str, Any]) -> Optional[JobDetail]:
-        """
-        将职位数据转换为JobDetail模型
-        
-        Args:
-            job_data: 职位数据
-            
-        Returns:
-            JobDetail模型，如果转换失败则返回None
-        """
-        try:
-            # 处理需要标准化的字段
-            if job_data.get("requirements") and isinstance(job_data["requirements"], str):
-                # 如果requirements是字符串，尝试将其转换为列表
-                requirements_text = job_data["requirements"]
-                # 按行分割，过滤空行，去除列表符号
-                requirements_list = [
-                    re.sub(r'^\s*[\-\*•]\s*', '', line.strip())
-                    for line in requirements_text.split('\n')
-                    if line.strip()
-                ]
-                job_data["requirements"] = requirements_list
-                
-            if job_data.get("responsibilities") and isinstance(job_data["responsibilities"], str):
-                # 如果responsibilities是字符串，尝试将其转换为列表
-                responsibilities_text = job_data["responsibilities"]
-                # 按行分割，过滤空行，去除列表符号
-                responsibilities_list = [
-                    re.sub(r'^\s*[\-\*•]\s*', '', line.strip())
-                    for line in responsibilities_text.split('\n')
-                    if line.strip()
-                ]
-                job_data["responsibilities"] = responsibilities_list
-                
-            if job_data.get("benefits") and isinstance(job_data["benefits"], str):
-                # 如果benefits是字符串，尝试将其转换为列表
-                benefits_text = job_data["benefits"]
-                # 按行分割，过滤空行，去除列表符号
-                benefits_list = [
-                    re.sub(r'^\s*[\-\*•]\s*', '', line.strip())
-                    for line in benefits_text.split('\n')
-                    if line.strip()
-                ]
-                job_data["benefits"] = benefits_list
-            
-            # 包装为Pydantic模型返回
-            try:
-                return JobDetail(**job_data)
-            except Exception as e:
-                # 如果无法直接转换为Pydantic模型，过滤掉额外字段后重试
-                logger.warning(f"转换JobDetail模型失败，尝试过滤字段: {str(e)}")
-                # 仅保留JobDetail模型中定义的字段
-                valid_fields = JobDetail.__annotations__.keys()
-                filtered_data = {k: v for k, v in job_data.items() if k in valid_fields}
-                return JobDetail(**filtered_data)
-        except Exception as e:
-            logger.error(f"转换职位数据失败: {str(e)}")
-            return None
+    def __init__(self):
+        self.browser_scraper = BrowserScraperService.get_instance()
+        self.platform_factory = PlatformFactory()
 
 # 为了向后兼容，保留原有的调用方式
-agent_service = AgentService.get_instance()
+agent_service = AgentService()

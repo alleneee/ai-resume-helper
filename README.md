@@ -16,9 +16,11 @@
 ### 前端
 
 - React + TypeScript
-- Next.js
+- Vite
 - Ant Design
 - TailwindCSS
+- Axios
+- Lucide React (图标库)
 
 ### 后端
 
@@ -39,7 +41,17 @@
 
 ```
 ai-resume-helper/
-├── client/                      # 前端代码（Next.js应用）
+├── client/                      # 前端代码（React + Vite应用）
+│   ├── src/                     # 源代码
+│   │   ├── components/          # 组件
+│   │   ├── pages/               # 页面
+│   │   ├── services/            # API服务
+│   │   ├── utils/               # 工具函数
+│   │   ├── App.tsx              # 应用入口
+│   │   └── main.tsx             # 主入口
+│   ├── public/                  # 静态资源
+│   ├── package.json             # 依赖配置
+│   └── vite.config.ts           # Vite配置
 ├── server/                      # 后端代码（FastAPI应用）
 │   ├── api/                     # API路由
 │   │   ├── auth.py              # 认证相关API
@@ -70,6 +82,7 @@ ai-resume-helper/
 ### 前提条件
 
 - Python 3.9+
+- Node.js 18+
 - MongoDB
 - OpenAI API密钥
 - Firecrawl API密钥
@@ -90,7 +103,7 @@ cd server
 pip install -r requirements.txt
 ```
 
-3\. 配置环境变量
+3. 配置后端环境变量
 
 创建`.env`文件并设置以下变量：
 
@@ -105,20 +118,41 @@ JOB_SEARCH_API_KEY=your_job_search_api_key
 FIRECRAWL_API_KEY=fc-your_firecrawl_api_key  # 用于网页爬取的Firecrawl API密钥
 ```
 
-4\. 启动后端服务
+4. 安装前端依赖
+
+```bash
+cd client
+npm install
+```
+
+5. 配置前端环境变量
+
+创建`.env`文件并设置以下变量：
+
+```makefile
+VITE_API_BASE_URL=http://localhost:8000/api
+VITE_APP_TITLE=智能职位分析与简历优化系统
+```
+
+6. 启动服务
+
+**启动后端:**
 
 ```bash
 cd server
 uvicorn main:app --reload --port 8000
 ```
 
-5\. 安装并启动前端（可选）
+**启动前端:**
 
 ```bash
 cd client
-npm install
 npm run dev
 ```
+
+7. 访问应用
+
+打开浏览器，访问 [http://localhost:3000](http://localhost:3000)
 
 ## 获取API密钥
 
@@ -176,6 +210,7 @@ npm run dev
 - **异常处理**：全局异常处理和详细错误信息
 - **OpenAPI文档**：自动生成的API文档
 - **Firecrawl集成**：高效网页爬取和内容提取
+- **现代UI设计**：深色主题，渐变色，响应式设计
 
 ## 安全性
 

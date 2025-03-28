@@ -23,7 +23,7 @@ if __name__ == "__main__":
     
     # 启动服务
     uvicorn.run(
-        "server.python-api.main:app",
+        "server.main:app",
         host=host,
         port=port,
         log_level=log_level,

@@ -7,18 +7,18 @@ import logging
 import os
 from pydantic import BaseModel, Field
 
-from agents import Agent, Runner, function_tool, RunStatus, AgentHooks, RunContextWrapper, Tool, trace, handoff
-from agents.run import Run
+from agents import Agent, Runner, function_tool, AgentHooks, RunContextWrapper, Tool, trace, handoff
+from agents.run import RunResult
 from agents.model_settings import ModelSettings
 from agents import GuardrailFunctionOutput, input_guardrail, output_guardrail
 
-from models.agent import ResumeOptimizationResult, ResumeOptimizationRequest, ResumeOptimizeRequest, ResumeOptimizeResponse
+from models.agent import ResumeOptimizationResult, ResumeOptimizationRequest
 from utils.response import ErrorCode
 
 # 导入 LangChain 相关库
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
-from langchain.output_parsers import StrOutputParser
+from langchain_core.output_parsers import StrOutputParser
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -206,8 +206,8 @@ async def resume_optimization_output_guardrail(
 
 # 简历分析工具
 @function_tool
-@input_guardrail(resume_content_guardrail)
-@output_guardrail(resume_analysis_output_guardrail)
+@input_guardrail
+@output_guardrail
 def analyze_resume(resume_content: str) -> ResumeAnalysisOutput:
     """
     分析简历内容，提取优势、劣势、关键词和技能缺口
@@ -333,9 +333,9 @@ def analyze_resume(resume_content: str) -> ResumeAnalysisOutput:
 
 # 简历优化工具
 @function_tool
-@input_guardrail(resume_content_guardrail)
-@input_guardrail(job_description_guardrail)
-@output_guardrail(resume_optimization_output_guardrail)
+@input_guardrail
+@input_guardrail
+@output_guardrail
 def optimize_resume(
     resume_content: str, 
     job_description: str, 
@@ -531,11 +531,11 @@ resume_optimization_agent = Agent(
     hooks=ResumeAgentHooks(display_name="简历优化代理"),
     output_type=ResumeOptimizationOutput,
     model_settings=ModelSettings(temperature=0.3),
-    handoffs=[handoff(resume_analysis_agent, description="需要详细分析简历")]
+    handoffs=[handoff(resume_analysis_agent, tool_description_override="需要详细分析简历")]
 )
 
 async def optimize_resume_handler(
-    request: ResumeOptimizeRequest,
+    request: ResumeOptimizationRequest,
     resume_content: str,
     job_analysis: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:

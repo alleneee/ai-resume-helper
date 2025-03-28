@@ -70,7 +70,7 @@ class BaseAPIModel(BaseModel, Generic[T]):
         }
     )
 
-class ResponseModel(BaseAPIModel, Generic[DataT]):
+class ResponseModel(BaseAPIModel, Generic[T, DataT]):
     """标准API响应模型"""
     success: bool = Field(
         ..., 
@@ -134,7 +134,7 @@ class ResponseModel(BaseAPIModel, Generic[DataT]):
         data: Optional[DataT] = None, 
         message: str = "操作成功",
         request_id: Optional[str] = None
-    ) -> 'ResponseModel[DataT]':
+    ) -> 'ResponseModel[T, DataT]':
         """
         创建成功响应实例
         
@@ -201,7 +201,7 @@ class PaginationInfo(BaseAPIModel):
             has_next=has_next
         )
 
-class PaginatedResponseModel(ResponseModel, Generic[DataT]):
+class PaginatedResponseModel(ResponseModel[T, List[DataT]], Generic[T, DataT]):
     """分页响应模型"""
     data: Optional[List[DataT]] = Field(None, description="分页数据列表")
     pagination: PaginationInfo = Field(..., description="分页信息")
@@ -238,7 +238,7 @@ class PaginatedResponseModel(ResponseModel, Generic[DataT]):
         total: int,
         message: str = "获取数据成功",
         request_id: Optional[str] = None
-    ) -> 'PaginatedResponseModel[DataT]':
+    ) -> 'PaginatedResponseModel[T, DataT]':
         """
         创建分页响应实例
         

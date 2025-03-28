@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     # 日志配置
     LOG_LEVEL: str = Field("INFO", description="日志级别")
     
+    # 浏览器配置
+    BROWSER_HEADLESS: bool = Field(True, description="浏览器无头模式")
+    BROWSER_WIDTH: int = Field(1920, description="浏览器窗口宽度")
+    BROWSER_HEIGHT: int = Field(1080, description="浏览器窗口高度")
+    BROWSER_TIMEOUT: int = Field(30, description="浏览器操作超时时间（秒）")
+    
     # Pydantic v2 配置
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -153,6 +159,16 @@ class Settings(BaseSettings):
             "resume_optimizer_id": self.RESUME_OPTIMIZER_ASSISTANT_ID,
             "job_search_id": self.JOB_SEARCH_ASSISTANT_ID,
             "cover_letter_id": self.COVER_LETTER_ASSISTANT_ID
+        }
+        
+    @property
+    def browser_settings(self) -> Dict[str, Any]:
+        """浏览器设置"""
+        return {
+            "headless": self.BROWSER_HEADLESS,
+            "width": self.BROWSER_WIDTH,
+            "height": self.BROWSER_HEIGHT,
+            "timeout": self.BROWSER_TIMEOUT
         }
 
 

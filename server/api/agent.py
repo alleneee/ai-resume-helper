@@ -2,7 +2,7 @@
 智能代理相关的API路由
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Query, Path, Request
-from typing import Dict, Any
+from typing import Dict, Any, Annotated, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import logging
 from datetime import datetime

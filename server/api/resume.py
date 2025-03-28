@@ -56,10 +56,10 @@ def allowed_file(filename: str) -> bool:
 async def upload_resume(
     resume_file: Annotated[UploadFile, File(...)],
     title: Annotated[str, Form(...)],
-    description: Annotated[Optional[str], Form(None)],
     current_user: Annotated[Dict[str, Any], Depends(AuthMiddleware.get_current_user)],
     db: Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)],
-    request_id: str = Depends(get_request_id)
+    request_id: str = Depends(get_request_id),
+    description: Annotated[Optional[str], Form()] = None
 ):
     """
     上传简历
@@ -163,11 +163,11 @@ async def upload_resume(
     }
 )
 async def get_resumes(
-    page: Annotated[int, Query(1, ge=1, description="页码")],
-    limit: Annotated[int, Query(10, ge=1, le=100, description="每页数量")],
     current_user: Annotated[Dict[str, Any], Depends(AuthMiddleware.get_current_user)],
     db: Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)],
-    request_id: str = Depends(get_request_id)
+    request_id: str = Depends(get_request_id),
+    page: Annotated[int, Query(ge=1, description="页码")] = 1,
+    limit: Annotated[int, Query(ge=1, le=100, description="每页数量")] = 10
 ):
     """
     获取简历列表

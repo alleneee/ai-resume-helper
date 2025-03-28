@@ -5,10 +5,10 @@ import jwt
 from fastapi import Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from config.app import config
+from config.settings import get_settings
 from models.database import get_mongo_db
 
 security = HTTPBearer()
@@ -30,9 +30,9 @@ class AuthMiddleware:
         Returns:
             JWT令牌字符串
         """
-        jwt_secret = config['security']['jwtSecret']
+        jwt_secret = get_settings().SECRET_KEY
         # 解析JWT过期时间字符串（例如："7d"）
-        expires_in = config['security']['jwtExpiresIn']
+        expires_in = get_settings().JWT_EXPIRES_IN
         
         # 处理过期时间格式
         if expires_in.endswith('d'):
@@ -70,7 +70,7 @@ class AuthMiddleware:
             HTTPException: 如果令牌无效或已过期
         """
         token = credentials.credentials
-        jwt_secret = config['security']['jwtSecret']
+        jwt_secret = get_settings().SECRET_KEY
         
         try:
             payload = jwt.decode(token, jwt_secret, algorithms=['HS256'])
@@ -106,4 +106,59 @@ class AuthMiddleware:
         
         return user
 
+
+
 auth_middleware = AuthMiddleware()
+
+def get_current_user_with_permissions(required_permissions: List[str] = None):
+    """
+    获取当前用户并检查权限
+    
+    Args:
+        required_permissions: 所需的权限列表
+        
+    Returns:
+        依赖函数，返回用户对象
+        
+    Raises:
+        HTTPException: 如果用户不存在或没有所需权限
+    """
+    async def _get_user_with_permissions(
+        payload: Dict[str, Any] = Depends(AuthMiddleware.verify_token),
+        db: AsyncIOMotorDatabase = Depends(get_mongo_db)
+    ) -> Dict[str, Any]:
+        user_id = payload['sub']
+        user = await db.users.find_one({'_id': user_id})
+        
+        if user is None:
+            raise HTTPException(
+                status_code=404, 
+                detail='用户不存在',
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        
+        # 如果没有指定权限要求，直接返回用户
+        if not required_permissions:
+            return user
+        
+        # 检查用户权限
+        user_permissions = user.get('permissions', [])
+        user_role = user.get('role', 'USER')
+        
+        # 管理员拥有所有权限
+        if user_role == 'ADMIN':
+            return user
+        
+        # 检查用户是否具有所有所需权限
+        has_all_permissions = all(perm in user_permissions for perm in required_permissions)
+        
+        if not has_all_permissions:
+            raise HTTPException(
+                status_code=403, 
+                detail='权限不足',
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        
+        return user
+    
+    return _get_user_with_permissions

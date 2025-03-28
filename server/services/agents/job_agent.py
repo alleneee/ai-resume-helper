@@ -9,11 +9,11 @@ import logging
 import asyncio
 from typing import Dict, Any, List, Optional, Union, TypedDict
 from datetime import datetime
-from server.database.mongodb import get_db
+from database.mongodb import get_db
 from pydantic import BaseModel, Field
 from openai.types.beta.threads import Run
 
-from agents import Agent as OpenAIAgent, RunStatus, Runner, AgentHooks, RunContextWrapper, Tool, trace
+from agents import Agent as OpenAIAgent, Runner, AgentHooks, RunContextWrapper, Tool, trace
 from agents.tool import function_tool
 from agents import GuardrailFunctionOutput, input_guardrail, output_guardrail
 
@@ -23,21 +23,21 @@ from browser_use.browser.browser import Browser, BrowserConfig
 from browser_use.controller.service import Controller
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
-from langchain.output_parsers import StrOutputParser
+from langchain_core.output_parsers import StrOutputParser
 
-from server.models.agent import (
+from models.agent import (
     JobSearchRequest, 
     JobSearchResponse,
     JobMatchRequest, 
     JobMatchResponse,
-    ResumeOptimizeRequest, 
-    ResumeOptimizeResponse,
+    ResumeOptimizationRequest, 
+    ResumeOptimizationResult,
     JobSearchInput,
     JobSearchOutput,
     JobMatchInput,
     JobMatchOutput,
-    ResumeOptimizeInput,
-    ResumeOptimizeOutput,
+    ResumeOptimizationInput,
+    ResumeOptimizationOutput,
     JobType,
     ExperienceLevel,
     JobAnalysisInput,
@@ -348,9 +348,9 @@ async def job_analysis_output_guardrail(
     )
 
 # 职位搜索工具
+@output_guardrail
+@input_guardrail
 @function_tool
-@input_guardrail(search_keywords_guardrail)
-@output_guardrail(job_search_output_guardrail)
 async def search_jobs(params: JobSearchInput) -> JobSearchOutput:
     """根据指定条件搜索职位信息"""
     try:
@@ -500,10 +500,9 @@ def _get_mock_job_search_results(params: JobSearchInput) -> JobSearchOutput:
     )
 
 # 职位匹配工具
+@output_guardrail
+@input_guardrail
 @function_tool
-@input_guardrail(resume_content_guardrail)
-@input_guardrail(job_requirements_guardrail)
-@output_guardrail(job_match_output_guardrail)
 def match_job(input_data: JobMatchInput) -> JobMatchOutput:
     """根据简历内容和职位要求进行匹配分析"""
     # 提取简历中的技能关键词
@@ -536,9 +535,9 @@ def match_job(input_data: JobMatchInput) -> JobMatchOutput:
     )
 
 # 职位分析工具
+@output_guardrail
+@input_guardrail
 @function_tool
-@input_guardrail(job_data_guardrail)
-@output_guardrail(job_analysis_output_guardrail)
 def analyze_jobs(input_data: JobAnalysisInput) -> JobAnalysisOutput:
     """分析职位数据，提取共同点和要求"""
     logger.info(f"开始分析职位数据，共{len(input_data.jobs)}个职位")
@@ -843,6 +842,7 @@ job_analysis_agent = OpenAIAgent(
     handoffs=[{"agent": "简历优化专家", "trigger": "需要根据分析结果优化简历"}]
 )
 
+# 如果有guardrail装饰器，确保它们在function_tool之前
 @function_tool
 async def handle_job_search(request: JobSearchRequest) -> JobSearchResponse:
     """处理职位搜索请求"""

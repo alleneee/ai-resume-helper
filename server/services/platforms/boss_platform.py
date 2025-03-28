@@ -7,22 +7,21 @@ import json
 from typing import Dict, Any, List, Optional
 from urllib.parse import quote
 
-from server.services.platforms.base_platform import BasePlatform
-from server.services.agent_service import BrowserScraperService
+from services.platforms.base_platform import BasePlatform
+from services.browser_scraper_service import BrowserScraperService
 
 logger = logging.getLogger(__name__)
 
 class BossPlatform(BasePlatform):
     """Boss直聘平台适配器实现"""
     
-    def __init__(self, browser_scraper: BrowserScraperService):
-        """
-        初始化Boss直聘平台适配器
-        
-        Args:
-            browser_scraper: 浏览器爬虫服务实例
-        """
-        self.browser_scraper = browser_scraper
+    def __init__(self):
+        self.browser_scraper = BrowserScraperService.get_instance()
+        # 父类初始化
+        super().__init__(
+            browser_service=self.browser_scraper,
+            logger=logger
+        )
         self._selectors = {
             "job_title": ".job-title, .name, h1",
             "company_name": ".company-name, .boss-name-info",
@@ -33,12 +32,22 @@ class BossPlatform(BasePlatform):
     @property
     def platform_name(self) -> str:
         """平台名称"""
-        return "Boss直聘"
+        return "boss"
     
     @property
     def base_url(self) -> str:
         """平台基础URL"""
         return "https://www.zhipin.com"
+        
+    @property
+    def search_base_url(self) -> str:
+        """搜索基础URL"""
+        return self._search_base_url
+        
+    @search_base_url.setter
+    def search_base_url(self, value: str):
+        """设置搜索基础URL"""
+        self._search_base_url = value
     
     def get_search_url(self, keywords: List[str], location: Optional[str] = None, **filters) -> str:
         """

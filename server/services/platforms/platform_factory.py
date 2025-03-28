@@ -4,9 +4,8 @@
 import logging
 from typing import Dict, Type, List, Optional, Any
 
-from server.services.platforms.base_platform import BasePlatform
-from server.services.platforms.boss_platform import BossPlatform
-from server.services.agent_service import BrowserScraperService
+from services.platforms.base_platform import BasePlatform
+from services.platforms.boss_platform import BossPlatform
 
 logger = logging.getLogger(__name__)
 
@@ -22,15 +21,11 @@ class PlatformFactory:
         # "51job": Job51Platform,
     }
     
-    def __init__(self, browser_scraper: BrowserScraperService):
-        """
-        初始化平台工厂
-        
-        Args:
-            browser_scraper: 浏览器爬虫服务实例
-        """
-        self.browser_scraper = browser_scraper
-        self._platform_instances = {}
+    def __init__(self):
+        """初始化平台工厂"""
+        self._platforms = {
+            "boss": BossPlatform()
+        }
     
     def get_platform(self, platform_name: str) -> Optional[BasePlatform]:
         """
@@ -46,8 +41,8 @@ class PlatformFactory:
         platform_name = platform_name.lower()
         
         # 检查是否已创建实例
-        if platform_name in self._platform_instances:
-            return self._platform_instances[platform_name]
+        if platform_name in self._platforms:
+            return self._platforms[platform_name]
         
         # 检查是否支持该平台
         if platform_name not in self._platform_classes:
@@ -57,8 +52,8 @@ class PlatformFactory:
         # 创建平台实例
         try:
             platform_class = self._platform_classes[platform_name]
-            platform = platform_class(self.browser_scraper)
-            self._platform_instances[platform_name] = platform
+            platform = platform_class()
+            self._platforms[platform_name] = platform
             logger.info(f"创建平台实例: {platform_name}")
             return platform
         except Exception as e:

@@ -36,7 +36,8 @@ from models.agent import (
 # 导入智能代理服务
 from services.agents.resume_agent import optimize_resume as agent_optimize_resume, analyze_resume as agent_analyze_resume
 from services.agents.job_agent import search_jobs as agent_search_jobs, match_job as agent_match_job
-from services.agents.cover_letter_agent import generate_cover_letter as agent_generate_cover_letter
+# TODO: 待实现求职信生成功能
+# from services.agents.cover_letter_agent import generate_cover_letter as agent_generate_cover_letter
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -340,11 +341,30 @@ async def generate_cover_letter(
         # 验证简历访问权限
         resume = await verify_resume_access(request.resume_id, current_user, db)
         
-        # 调用智能代理生成求职信
-        result = await agent_generate_cover_letter(
-            request=request,
-            resume_content=resume.get("content", "")
-        )
+        # TODO: 求职信生成功能尚未实现，返回临时响应
+        # 在cover_letter_agent实现后将使用以下代码
+        # result = await agent_generate_cover_letter(
+        #    request=request,
+        #    resume_content=resume.get("content", "")
+        # )
+        
+        # 临时响应
+        result = {
+            "success": True,
+            "data": {
+                "cover_letter": "尊敬的{}招聘团队\n\n我对贵公司的{}职位非常感兴趣...功能开发中".format(
+                    request.company_name, 
+                    request.job_title or "相关"
+                ),
+                "tone": request.tone or "professional",
+                "sections": [
+                    "自我介绍",
+                    "专业技能与经验",
+                    "对公司的了解与兴趣",
+                    "结词"
+                ]
+            }
+        }
         
         if not result.get("success"):
             # 处理代理返回的错误

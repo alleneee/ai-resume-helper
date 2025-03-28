@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom Ant Design theme overrides */
+.ant-btn-primary {
+  @apply bg-blue-500 hover:bg-blue-600 border-none text-white !important;
+}
+
+.ant-btn {
+  @apply text-sm font-medium rounded-md transition-all duration-200 !important;
+  height: auto !important;
+  padding: 8px 16px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px !important;
+  white-space: nowrap !important;
+  min-width: fit-content !important;
+  line-height: 1 !important;
+}
+
+.ant-btn-default {
+  @apply bg-white/5 border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 hover:bg-white/10 !important;
+}
+
+.ant-select-selector {
+  @apply bg-white/5 border-gray-700 !important;
+}
+
+.ant-select-selection-item {
+  @apply text-white !important;
+}
+
+.ant-input {
+  @apply bg-white/5 border-gray-700 text-white !important;
+}
+
+.ant-input::placeholder {
+  @apply text-gray-400 !important;
+}
+
+.ant-card {
+  @apply bg-transparent !important;
+}
+
+.ant-upload-drag {
+  @apply border-dashed !important;
+}
+
+.custom-steps .ant-steps-item-title {
+  @apply text-gray-300 !important;
+}
+
+.custom-steps .ant-steps-item-icon {
+  @apply bg-gray-800 border-gray-600 !important;
+}
+
+.custom-steps .ant-steps-item-icon .ant-steps-icon {
+  @apply text-gray-300 !important;
+}
+
+.custom-steps .ant-steps-item-finish .ant-steps-item-icon {
+  @apply bg-blue-500 border-blue-400 !important;
+}
+
+.custom-steps .ant-steps-item-finish .ant-steps-item-icon .ant-steps-icon {
+  @apply text-white !important;
+}
+
+.custom-steps .ant-steps-item-process .ant-steps-item-icon {
+  @apply bg-blue-500 border-blue-400 !important;
+}
+
+.custom-steps .ant-steps-item-process .ant-steps-item-icon .ant-steps-icon {
+  @apply text-white !important;
+}
+
+.custom-steps .ant-steps-item-tail::after {
+  @apply bg-gray-700 !important;
+}
+
+.custom-steps .ant-steps-item-finish .ant-steps-item-tail::after {
+  @apply bg-blue-500 !important;
+}

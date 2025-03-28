@@ -721,6 +721,251 @@ class AgentResponse(BaseAPIModel, Generic[T]):
         return cls(success=False, message=message, data=data or {})
 
 
+# 定义JobSearchInput类
+class JobSearchInput(BaseAPIModel):
+    """职位搜索输入参数模型"""
+    title: ClassVar[str] = "职位搜索输入"
+    description: ClassVar[str] = "用于智能代理搜索职位的输入参数模型"
+    
+    keywords: List[str] = Field(..., description="搜索关键词列表")
+    location: Optional[str] = Field(None, description="工作地点")
+    job_type: Optional[str] = Field(None, description="工作类型，如全职、兼职等")
+    experience_level: Optional[str] = Field(None, description="经验要求")
+    education_level: Optional[str] = Field(None, description="学历要求")
+    salary_min: Optional[int] = Field(None, description="最低薪资")
+    salary_max: Optional[int] = Field(None, description="最高薪资")
+    company_size: Optional[str] = Field(None, description="公司规模")
+    funding_stage: Optional[str] = Field(None, description="融资阶段")
+    page: int = Field(1, description="页码")
+    limit: int = Field(10, description="每页结果数量")
+    
+    model_config = ConfigDict(
+        title="职位搜索输入",
+        json_schema_extra={
+            "example": {
+                "keywords": ["Python", "FastAPI", "React"],
+                "location": "上海",
+                "job_type": "full_time",
+                "experience_level": "mid",
+                "education_level": "bachelor",
+                "salary_min": 20000,
+                "salary_max": 40000,
+                "company_size": "medium",
+                "funding_stage": "series_b",
+                "page": 1,
+                "limit": 10
+            }
+        }
+    )
+
+# 定义JobSearchOutput类
+class JobSearchOutput(BaseAPIModel):
+    """职位搜索结果模型"""
+    title: ClassVar[str] = "职位搜索结果"
+    description: ClassVar[str] = "智能代理搜索职位的输出结果模型"
+    
+    jobs: List[Dict[str, Any]] = Field(..., description="搜索到的职位列表")
+    total: int = Field(..., description="结果总数")
+    page: int = Field(..., description="当前页码")
+    limit: int = Field(..., description="每页数量")
+    
+    model_config = ConfigDict(
+        title="职位搜索结果",
+        json_schema_extra={
+            "example": {
+                "jobs": [
+                    {
+                        "id": "job123",
+                        "title": "高级Python开发工程师",
+                        "company": "科技有限公司",
+                        "location": "上海",
+                        "description": "负责设计和实现高性能的Web应用程序...",
+                        "salary": "20k-40k",
+                        "job_type": "全职",
+                        "experience_level": "3-5年",
+                        "education_level": "本科及以上"
+                    }
+                ],
+                "total": 100,
+                "page": 1,
+                "limit": 10
+            }
+        }
+    )
+
+# 定义JobMatchInput类
+class JobMatchInput(BaseAPIModel):
+    """职位匹配输入参数模型"""
+    title: ClassVar[str] = "职位匹配输入"
+    description: ClassVar[str] = "用于智能代理匹配简历和职位的输入参数模型"
+    
+    resume_content: str = Field(..., description="简历内容")
+    job_requirements: str = Field(..., description="职位要求描述")
+    
+    model_config = ConfigDict(
+        title="职位匹配输入",
+        json_schema_extra={
+            "example": {
+                "resume_content": "简历内容...",
+                "job_requirements": "职位要求描述..."
+            }
+        }
+    )
+
+# 定义ResumeOptimizationInput类
+class ResumeOptimizationInput(BaseAPIModel):
+    """简历优化输入参数模型"""
+    title: ClassVar[str] = "简历优化输入"
+    description: ClassVar[str] = "用于智能代理优化简历的输入参数模型"
+    
+    resume_content: str = Field(..., description="原始简历内容")
+    job_description: str = Field(..., description="目标职位描述")
+    focus_areas: Optional[List[str]] = Field(None, description="需要重点关注的领域或技能")
+    job_analysis: Optional[Dict[str, Any]] = Field(None, description="职位分析结果，包含共同要求、关键技能等")
+    
+    model_config = ConfigDict(
+        title="简历优化输入",
+        json_schema_extra={
+            "example": {
+                "resume_content": "简历内容...",
+                "job_description": "职位描述...",
+                "focus_areas": ["Python", "FastAPI", "React"],
+                "job_analysis": {
+                    "common_requirements": ["精通前端开发", "熟悉React框架"],
+                    "key_skills": {"Python": 10, "FastAPI": 8, "React": 12}
+                }
+            }
+        }
+    )
+
+# 定义JobAnalysisInput类
+class JobAnalysisInput(BaseAPIModel):
+    """职位分析输入参数模型"""
+    title: ClassVar[str] = "职位分析输入"
+    description: ClassVar[str] = "用于智能代理分析职位的输入参数模型"
+    
+    jobs: List[Dict[str, Any]] = Field(..., description="职位列表")
+    analysis_focus: Optional[List[str]] = Field(None, description="分析重点，如'技能要求'、'经验要求'等")
+    
+    model_config = ConfigDict(
+        title="职位分析输入",
+        json_schema_extra={
+            "example": {
+                "jobs": [
+                    {
+                        "id": "job123",
+                        "title": "高级Python开发工程师",
+                        "company": "科技有限公司",
+                        "location": "上海",
+                        "description": "负责设计和实现高性能的Web应用程序...",
+                        "requirements": "精通Python和FastAPI，熟悉React框架..."
+                    }
+                ],
+                "analysis_focus": ["技能要求", "经验要求"]
+            }
+        }
+    )
+
+# 定义JobAnalysisOutput类
+class JobAnalysisOutput(BaseAPIModel):
+    """职位分析结果模型"""
+    title: ClassVar[str] = "职位分析结果"
+    description: ClassVar[str] = "智能代理分析职位的输出结果模型"
+    
+    common_requirements: List[str] = Field(..., description="共同职位要求")
+    key_skills: Dict[str, int] = Field(..., description="关键技能及其频率")
+    experience_requirements: Dict[str, int] = Field(..., description="经验要求统计")
+    education_requirements: Dict[str, int] = Field(..., description="学历要求统计")
+    salary_range: Dict[str, Any] = Field(..., description="薪资范围分析")
+    report_summary: str = Field(..., description="岗位需求报告摘要")
+    
+    model_config = ConfigDict(
+        title="职位分析结果",
+        json_schema_extra={
+            "example": {
+                "common_requirements": ["精通Python", "熟悉Web开发"],
+                "key_skills": {"Python": 10, "FastAPI": 8, "React": 12},
+                "experience_requirements": {"3-5年": 15, "5年以上": 5},
+                "education_requirements": {"本科": 10, "硕士": 10},
+                "salary_range": {"min": 20000, "max": 40000, "average": 30000},
+                "report_summary": "大多数职位要求精通Python和Web开发，并且要求3-5年的相关经验..."
+            }
+        }
+    )
+
+# 定义ResumeOptimizationOutput类
+class ResumeOptimizationOutput(BaseAPIModel):
+    """简历优化结果模型"""
+    title: ClassVar[str] = "简历优化结果"
+    description: ClassVar[str] = "智能代理优化简历的输出结果模型"
+    
+    optimized_content: str = Field(..., description="优化后的简历内容")
+    suggestions: List[str] = Field(..., description="改进建议")
+    matched_skills: Optional[List[str]] = Field(None, description="与职位匹配的技能")
+    missing_skills: Optional[List[str]] = Field(None, description="缺失的技能")
+    
+    model_config = ConfigDict(
+        title="简历优化结果",
+        json_schema_extra={
+            "example": {
+                "optimized_content": "优化后的简历内容...",
+                "suggestions": ["增加项目经验描述", "突出技术技能"],
+                "matched_skills": ["Python", "FastAPI", "React"],
+                "missing_skills": ["Docker", "Kubernetes"]
+            }
+        }
+    )
+
+# 定义JobMatchOutput类
+class JobMatchOutput(BaseAPIModel):
+    """职位匹配结果模型"""
+    title: ClassVar[str] = "职位匹配结果"
+    description: ClassVar[str] = "智能代理匹配简历和职位的输出结果模型"
+    
+    match_score: float = Field(..., description="匹配分数，0-1之间")
+    matching_skills: List[str] = Field(..., description="匹配的技能列表")
+    missing_skills: List[str] = Field(..., description="缺失的技能列表")
+    recommendations: List[str] = Field(..., description="求职建议列表")
+    
+    model_config = ConfigDict(
+        title="职位匹配结果",
+        json_schema_extra={
+            "example": {
+                "match_score": 0.85,
+                "matching_skills": ["Python", "FastAPI", "React"],
+                "missing_skills": ["Docker", "Kubernetes"],
+                "recommendations": ["增加Docker经验", "学习Kubernetes"]
+            }
+        }
+    )
+
+# 定义JobMatchResponse类
+class JobMatchResponse(BaseAPIModel):
+    """职位匹配响应模型"""
+    title: ClassVar[str] = "职位匹配响应"
+    description: ClassVar[str] = "包含职位匹配结果的响应模型"
+    
+    resume_id: ObjectId = Field(..., description="简历ID")
+    job_id: str = Field(..., description="职位ID")
+    match_score: float = Field(..., description="匹配分数，0-1之间")
+    matching_skills: List[str] = Field(..., description="匹配的技能列表")
+    missing_skills: List[str] = Field(..., description="缺失的技能列表")
+    recommendations: List[str] = Field(..., description="求职建议列表")
+    
+    model_config = ConfigDict(
+        title="职位匹配响应",
+        json_schema_extra={
+            "example": {
+                "resume_id": "507f1f77bcf86cd799439011",
+                "job_id": "job123",
+                "match_score": 0.85,
+                "matching_skills": ["Python", "FastAPI", "React"],
+                "missing_skills": ["Docker", "Kubernetes"],
+                "recommendations": ["增加Docker经验", "学习Kubernetes"]
+            }
+        }
+    )
+
 # 为兼容性提供别名
 JobSearchResponse = JobSearchResult
 

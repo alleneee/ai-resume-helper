@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from .settings import get_settings, Settings
-from server.utils.response import ApiResponse, register_exception_handlers
+from utils.response import ApiResponse, register_exception_handlers
 
 # 配置日志
 logger = logging.getLogger(__name__)
