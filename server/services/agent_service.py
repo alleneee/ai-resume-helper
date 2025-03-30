@@ -168,7 +168,7 @@ class BrowserScraperService:
     """浏览器爬虫服务，处理所有与browser-use相关的操作"""
     
     _instance = None
-    
+
     @classmethod
     def get_instance(cls, 
                     controller: Controller = None,
@@ -206,7 +206,7 @@ class BrowserScraperService:
         return cls._instance
     
     def __init__(
-        self, 
+        self,
         controller: Controller,
         browser_config: Optional[BrowserConfig] = None,
         llm_factory: Optional[LLMFactory] = None,
@@ -450,9 +450,22 @@ class BrowserScraperService:
                 json_data = json.loads(json_text)
             else:
                 # 如果没有找到JSON代码块，尝试直接解析
-                json_data = json.loads(result)
-        except Exception as e:
-            logger.warning(f"解析爬取结果为JSON失败: {str(e)}")
+                # 这里需要额外的错误处理，因为直接解析可能失败
+                try:
+                    json_data = json.loads(result)
+                except json.JSONDecodeError:
+                     logger.warning(f"直接解析结果为JSON失败。结果非标准JSON格式。")
+                     # 或者尝试其他提取方式
+                     json_data = {} # 重置为默认值
+                except Exception as inner_e: # 捕获其他可能的错误
+                    logger.warning(f"直接解析结果时发生未知错误: {inner_e}")
+                    json_data = {} # 重置为默认值
+        except json.JSONDecodeError as json_e: # 更具体的异常捕获
+             logger.warning(f"解析提取的JSON文本失败: {json_e}")
+             json_data = {} # 确保失败时有默认值
+        except Exception as e: # 捕获其他查找或加载错误
+            logger.warning(f"提取或解析JSON时发生错误: {e}")
+            json_data = {} # 确保失败时有默认值
         
         return json_data
     
@@ -469,48 +482,55 @@ class BrowserScraperService:
         """
         url = job.get("url")
         if not url:
+            logger.warning(f"职位缺少URL，无法爬取详情: {job.get('title', '未知标题')}")
             return job
         
-        # 创建详细职位信息
         detailed_job = job.copy()
+        logger.debug(f"开始爬取职位详情: {url}")
         
         # 使用browser-use爬取页面内容
+        browser_use_successful = False
         try:
-            # 定义爬取任务
             task = self._create_job_detail_task(url)
+            logger.debug(f"创建 browser-use 任务: {task[:100]}...") # Log a snippet
             
-            # 获取浏览器实例
             async with self.get_browser() as browser:
-                # 使用辅助方法创建浏览器代理
+                logger.debug(f"获取到浏览器实例用于: {url}")
                 browser_agent = await self.create_browser_agent(
                     task=task,
                     browser=browser
                 )
+                logger.debug(f"创建 browser-use agent 完成")
                 
-                # 运行爬取任务
                 result = await browser_agent.run()
+                logger.info(f"Browser-use 爬取完成: {url}. 结果长度: {len(result)}")
                 
-                # 解析结果
-                logger.info(f"Browser-use 爬取工作详情完成: {url}")
-                
-                # 从结果中提取JSON数据
                 json_data = self._extract_json_from_result(result)
                 
-                # 更新详细职位信息
                 if json_data:
-                    # 与详细职位信息合并
+                    logger.info(f"Browser-use 成功提取到 JSON 数据，共 {len(json_data)} 个字段")
+                    # 与详细职位信息合并，优先保留已有的或更新非空值
                     for key, value in json_data.items():
-                        if value and not detailed_job.get(key):
-                            detailed_job[key] = value
-                    
-                    # 如果至少提取了部分信息，则返回
-                    return detailed_job
-            
+                        if value: # Only merge non-empty values from scraped data
+                           detailed_job[key] = value # Overwrite or add
+                    browser_use_successful = True # 标记 browser-use 成功提取了数据
+                    return detailed_job # 成功提取，直接返回
+                else:
+                     logger.warning(f"Browser-use 运行完成但未能提取有效 JSON 数据: {url}")
+
         except Exception as e:
-            logger.error(f"使用Browser-use爬取职位详情失败: {str(e)}，将使用备用方法")
+            logger.error(f"使用 Browser-use 爬取职位详情失败: {e}", exc_info=True)
+            # 不在此处返回，允许尝试备用方法
         
-        # 备用方法：使用httpx直接爬取
-        return await self._scrape_with_http(url, detailed_job)
+        # 如果 browser-use 未成功提取数据，则使用备用方法
+        if not browser_use_successful:
+             logger.info(f"Browser-use 未能提取数据，尝试使用 HTTP 备用方法: {url}")
+             return await self._scrape_with_http(url, detailed_job)
+        else:
+             # 理论上不应到达这里，因为成功时已返回
+             # 但为防万一，返回已更新（或未更新）的 detailed_job
+             logger.warning(f"代码逻辑异常，browser_use 标记成功但未返回，返回当前 job: {url}")
+             return detailed_job
     
     async def create_browser_agent(self, task: str, browser: Optional[Browser] = None) -> BrowserAgent:
         """

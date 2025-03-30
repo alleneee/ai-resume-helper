@@ -1,21 +1,36 @@
 import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import path from 'path';
+import { resolve } from 'path';
+import reactSWC from '@vitejs/plugin-react-swc';
 
 // https://vitejs.dev/config/
 export default defineConfig({
-    plugins: [react()],
+    plugins: [reactSWC()],
     resolve: {
         alias: {
-            '@': path.resolve(__dirname, './src')
+            '@': resolve(__dirname, './src')
         }
+    },
+    optimizeDeps: {
+        exclude: ['lucide-react']
     },
     server: {
         port: 3000,
         proxy: {
             '/api': {
-                target: 'http://127.0.0.1:8000',
+                target: 'http://localhost:8000',
                 changeOrigin: true
+            }
+        }
+    },
+    build: {
+        outDir: 'dist',
+        sourcemap: true,
+        rollupOptions: {
+            output: {
+                manualChunks: {
+                    vendor: ['react', 'react-dom', 'react-router-dom'],
+                    ui: ['antd', 'lucide-react']
+                }
             }
         }
     }

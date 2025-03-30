@@ -10,12 +10,17 @@ import uuid
 import logging
 from datetime import datetime
 from bson import ObjectId
+from pydantic import BaseModel
 
 from server.models.database import get_mongo_db
 from server.middleware.auth import AuthMiddleware, get_current_user
 from server.utils.response import ApiResponse, ResponseModel, PaginatedResponseModel
 from server.models.resume import ResumeModel, ResumeCreate, ResumeUpdate, ResumeResponse
 from server.utils.request_id import get_request_id
+
+# 从 agents_sdk 导入必要的模型和函数
+from server.agents_sdk.models import ResumeData, JobSearchCriteria, OptimizedResume
+from server.agents_sdk.main import run_resume_optimization_pipeline
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -28,6 +33,11 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 ALLOWED_EXTENSIONS = {"pdf", "doc", "docx"}
 
 router = APIRouter(tags=["简历"], prefix="/resumes")
+
+# --- 新增：优化简历请求模型 ---
+class ResumeOptimizeRequest(BaseModel):
+    resume_data: ResumeData
+    search_criteria: JobSearchCriteria
 
 def allowed_file(filename: str) -> bool:
     """
@@ -43,7 +53,7 @@ def allowed_file(filename: str) -> bool:
 
 @router.post(
     "/upload", 
-    response_model=ResponseModel,
+    response_model=ResponseModel[Any, ResumeResponse],
     status_code=status.HTTP_201_CREATED,
     summary="上传简历",
     description="上传新简历文件并保存相关元数据",
@@ -122,24 +132,43 @@ async def upload_resume(
             updated_at=datetime.utcnow()
         )
         
-        # 保存到数据库
-        result = await db.resumes.insert_one(resume.model_dump(by_alias=True))
+        # 构造要插入的数据，排除 'id' 字段让 MongoDB 自动生成 _id
+        resume_data = resume.model_dump(by_alias=True, exclude={'id'})
+        
+        # 插入数据库
+        result = await db.resumes.insert_one(resume_data)
         
         # 查询新创建的简历
-        created_resume = await db.resumes.find_one({"_id": result.inserted_id})
-        if not created_resume:
+        created_resume_dict = await db.resumes.find_one({"_id": result.inserted_id})
+        if not created_resume_dict:
             logger.error(f"简历创建后无法检索: {result.inserted_id} - 请求ID: {request_id}")
             return ApiResponse.server_error(
                 message="简历创建失败",
                 request_id=request_id
             )
         
+        # 手动将 _id 映射到 id 以匹配 ResumeResponse 模型
+        if "_id" in created_resume_dict:
+            created_resume_dict["id"] = str(created_resume_dict.pop("_id"))
+            
+        # 将字典转换为 ResumeResponse 模型实例以进行正确的序列化
+        try:
+            response_data = ResumeResponse.model_validate(created_resume_dict)
+        except Exception as validation_error:
+            logger.error(f"序列化响应数据时出错: {validation_error} - 请求ID: {request_id}")
+            # 即使序列化失败，也可能意味着数据已创建，但返回给用户时出错
+            return ApiResponse.server_error(
+                message="简历已创建，但在准备响应时出错",
+                exc=validation_error,
+                request_id=request_id
+            )
+
         logger.info(f"简历上传成功: {resume_file.filename} - ID: {result.inserted_id} - 请求ID: {request_id}")
         
-        # 返回简历信息
+        # 返回包含 Pydantic 模型的响应
         return ApiResponse.success(
             message="简历上传成功",
-            data=created_resume,
+            data=response_data, # 使用验证和序列化后的模型实例
             status_code=status.HTTP_201_CREATED,
             request_id=request_id
         )
@@ -532,3 +561,80 @@ async def delete_resume(
             exc=e,
             request_id=request_id
         )
+
+# --- 新增：优化简历端点 ---
+@router.post(
+    "/optimize",
+    response_model=ResponseModel, # 使用通用响应模型
+    status_code=status.HTTP_200_OK,
+    summary="优化简历",
+    description="根据职位搜索条件优化简历",
+    responses={
+        200: {"description": "简历优化成功", "model": ResponseModel[Any, OptimizedResume]}, # type: ignore[misc]
+        400: {"description": "请求参数无效"},
+        500: {"description": "优化过程中发生错误"}
+    }
+)
+async def optimize_resume(
+    body: Annotated[ResumeOptimizeRequest, Body(...)],
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
+    request_id: str = Depends(get_request_id)
+):
+    """
+    根据提供的简历数据和职位搜索条件运行优化流程。
+
+    Args:
+        body: 包含 resume_data 和 search_criteria 的请求体。
+        current_user: 当前登录用户信息。
+        request_id: 请求ID。
+
+    Returns:
+        ApiResponse: 包含优化结果或错误信息的响应。
+    """
+    logger.info(f"开始简历优化请求: 用户 {current_user.get('email')} - 请求ID: {request_id}")
+    final_response: Optional[JSONResponse] = None # 用于存储最终响应
+
+    try:
+        optimized_result: Optional[OptimizedResume] = await run_resume_optimization_pipeline(
+            resume_data=body.resume_data,
+            search_criteria=body.search_criteria
+        )
+
+        if optimized_result:
+            logger.info(f"简历优化成功: 用户 {current_user.get('email')} - 请求ID: {request_id}")
+            final_response = ApiResponse.success(
+                message="简历优化成功",
+                data=optimized_result,
+                request_id=request_id
+            )
+        else:
+            # 即使优化流程未返回完整结果，也认为是服务器端的问题，但操作本身可能已部分完成
+            logger.warning(f"简历优化流程完成但未返回结果: 用户 {current_user.get('email')} - 请求ID: {request_id}")
+            # 返回 success: false 但状态码 200，让前端知道请求已处理但结果不理想
+            final_response = ApiResponse.error(
+                error_code=ErrorCode.AI_SERVICE_ERROR, # 使用更具体的错误码
+                message="简历优化流程未能生成完整结果，可能由于职位信息获取失败或分析错误。",
+                status_code=status.HTTP_200_OK, # 保持 200 状态码，表示请求被处理
+                request_id=request_id
+            )
+
+    except Exception as e:
+        logger.exception(f"简历优化过程中发生严重错误: {e} - 用户 {current_user.get('email')} - 请求ID: {request_id}")
+        final_response = ApiResponse.server_error(
+            message="简历优化过程中发生内部错误",
+            exc=e,
+            request_id=request_id
+        )
+        
+    # 确保 final_response 被赋值
+    if final_response is None:
+        logger.error(f"优化流程结束后 final_response 意外为 None - 请求ID: {request_id}")
+        final_response = ApiResponse.server_error(
+            message="处理优化请求时发生未知错误",
+            request_id=request_id
+        )
+        
+    # 记录最终要返回的响应 (如果需要调试)
+    # logger.info(f"最终响应内容: {final_response.body.decode() if hasattr(final_response, 'body') else '无法解码响应体'}")
+        
+    return final_response # 始终返回 ApiResponse 对象
