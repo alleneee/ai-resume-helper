@@ -20,7 +20,7 @@ const Login: React.FC = () => {
             const response = await authApi.login(values.email, values.password);
             const responseData = response as unknown as ApiResponse<AuthData>;
 
-            if (responseData?.status === 'success' && responseData.data?.token) {
+            if (responseData?.success === true && responseData.data?.token) {
                 localStorage.setItem('token', responseData.data.token);
                 message.success('登录成功');
                 navigate('/');
@@ -28,6 +28,7 @@ const Login: React.FC = () => {
                 message.error(responseData?.message || '登录失败，请检查邮箱和密码');
             }
         } catch (error: any) {
+            console.error('登录错误:', error);
             message.error(error.response?.data?.message || '登录失败，请检查邮箱和密码');
         } finally {
             setLoading(false);

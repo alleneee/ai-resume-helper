@@ -10,18 +10,18 @@ from bson import ObjectId
 from functools import lru_cache
 import uuid
 
-from models.database import get_mongo_db
-from middleware.auth import AuthMiddleware
-from utils.response import (
+from server.models.database import get_mongo_db
+from server.middleware.auth import AuthMiddleware, get_current_user
+from server.utils.response import (
     ApiResponse, 
     ResponseModel, 
     PaginatedResponseModel,
     ErrorDetail,
     create_http_exception
 )
-from services.agent_service import AgentService
-from config.settings import get_settings, Settings
-from models.agent import (
+from server.services.agent_service import AgentService
+from server.config.settings import get_settings, Settings
+from server.models.agent import (
     ResumeOptimizationRequest, 
     JobMatchRequest, 
     CoverLetterRequest,
@@ -80,7 +80,7 @@ def get_request_id(request: Request) -> str:
 )
 async def optimize_resume(
     request: Annotated[ResumeOptimizationRequest, Body(description="优化请求参数")],
-    current_user: Annotated[Dict[str, Any], Depends(AuthMiddleware.get_current_user)],
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
     db: Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)],
     agent_service: Annotated[AgentService, Depends(get_agent_service)],
     request_id: str = Depends(get_request_id)
@@ -98,7 +98,7 @@ async def optimize_resume(
         request_id: 请求ID
     
     Returns:
-        JSONResponse: 优化后的简历内容和建议
+        CustomJSONResponse: 优化后的简历内容和建议
     """
     logger.info(f"处理简历优化请求: 用户: {current_user.get('email')} - 简历ID: {request.resume_id} - 请求ID: {request_id}")
     
@@ -176,7 +176,7 @@ async def optimize_resume(
 )
 async def match_jobs(
     request: Annotated[JobMatchRequest, Body(description="匹配请求参数")],
-    current_user: Annotated[Dict[str, Any], Depends(AuthMiddleware.get_current_user)],
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
     db: Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)],
     agent_service: Annotated[AgentService, Depends(get_agent_service)],
     request_id: str = Depends(get_request_id)
@@ -194,7 +194,7 @@ async def match_jobs(
         request_id: 请求ID
     
     Returns:
-        JSONResponse: 匹配的职位列表
+        CustomJSONResponse: 匹配的职位列表
     """
     logger.info(f"处理职位匹配请求: 用户: {current_user.get('email')} - 简历ID: {request.resume_id} - 请求ID: {request_id}")
     
@@ -272,7 +272,7 @@ async def match_jobs(
 )
 async def generate_cover_letter(
     request: Annotated[CoverLetterRequest, Body(description="求职信请求参数")],
-    current_user: Annotated[Dict[str, Any], Depends(AuthMiddleware.get_current_user)],
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
     db: Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)],
     agent_service: Annotated[AgentService, Depends(get_agent_service)],
     request_id: str = Depends(get_request_id)
@@ -290,7 +290,7 @@ async def generate_cover_letter(
         request_id: 请求ID
     
     Returns:
-        JSONResponse: 生成的求职信内容
+        CustomJSONResponse: 生成的求职信内容
     """
     logger.info(f"处理求职信生成请求: 用户: {current_user.get('email')} - 简历ID: {request.resume_id} - 请求ID: {request_id}")
     
@@ -371,7 +371,7 @@ async def generate_cover_letter(
 )
 async def search_jobs(
     request: Annotated[JobSearchRequest, Body(description="职位搜索请求参数")],
-    current_user: Dict[str, Any] = Depends(AuthMiddleware.get_current_user),
+    current_user: Dict[str, Any] = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
     agent_service: AgentService = Depends(get_agent_service),
     page: int = Query(1, ge=1, description="页码"),
@@ -459,7 +459,7 @@ async def search_jobs(
 
 @router.get("/search-jobs-by-title", response_model=ResponseModel)
 async def search_jobs_by_title(
-    current_user: Dict[str, Any] = Depends(AuthMiddleware.get_current_user),
+    current_user: Dict[str, Any] = Depends(get_current_user),
     agent_service: AgentService = Depends(get_agent_service),
     job_title: str = Query(..., description="职位标题"),
     location: Optional[str] = Query(None, description="位置"),
@@ -478,7 +478,7 @@ async def search_jobs_by_title(
         request_id: 请求ID
         
     Returns:
-        JSONResponse: 职位列表
+        CustomJSONResponse: 职位列表
     """
     logger.info(f"处理职位标题搜索请求: 用户: {current_user.get('email')} - 标题: {job_title} - 请求ID: {request_id}")
     
@@ -522,7 +522,7 @@ async def search_jobs_by_title(
     }
 )
 async def get_job_details(
-    current_user: Dict[str, Any] = Depends(AuthMiddleware.get_current_user),
+    current_user: Dict[str, Any] = Depends(get_current_user),
     agent_service: AgentService = Depends(get_agent_service),
     job_id: str = Path(..., description="职位ID"),
     request_id: str = Depends(get_request_id)
@@ -574,7 +574,7 @@ async def get_job_details(
     }
 )
 async def analyze_resume(
-    current_user: Dict[str, Any] = Depends(AuthMiddleware.get_current_user),
+    current_user: Dict[str, Any] = Depends(get_current_user),
     agent_service: AgentService = Depends(get_agent_service),
     request_data: Dict[str, Any] = Body(...),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
@@ -591,7 +591,7 @@ async def analyze_resume(
         request_id: 请求ID
         
     Returns:
-        JSONResponse: 分析结果
+        CustomJSONResponse: 分析结果
     """
     resume_id = request_data.get("resumeId")
     job_id = request_data.get("jobId")

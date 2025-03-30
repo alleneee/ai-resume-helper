@@ -2,11 +2,12 @@ import axios from 'axios';
 
 // API响应类型
 export interface ApiResponse<T = any> {
-    status: string;
+    success: boolean;
     message: string;
     data: T;
     request_id?: string;
     errors?: any[];
+    timestamp?: string;
 }
 
 // 创建axios实例

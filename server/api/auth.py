@@ -8,11 +8,11 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from datetime import datetime
 import logging
 
-from models.database import get_mongo_db
-from models.user import UserCreate, UserLogin, UserResponse, UserModel
-from middleware.auth import AuthMiddleware
-from utils.response import ApiResponse, ResponseModel, ErrorCode, ErrorDetail
-from utils.request_id import get_request_id
+from server.models.database import get_mongo_db
+from server.models.user import UserCreate, UserLogin, UserResponse, UserModel
+from server.middleware.auth import AuthMiddleware, get_current_user
+from server.utils.response import ApiResponse, ResponseModel, ErrorCode, ErrorDetail
+from server.utils.request_id import get_request_id
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ async def register(
         request_id: 请求ID
     
     Returns:
-        JSONResponse: 包含用户信息和JWT令牌的响应
+        CustomJSONResponse: 包含用户信息和JWT令牌的响应
     """
     logger.info(f"处理用户注册请求: {user_data.email} - 请求ID: {request_id}")
     
@@ -56,7 +56,7 @@ async def register(
             logger.warning(f"注册失败: 邮箱已存在 {user_data.email} - 请求ID: {request_id}")
             return ApiResponse.error(
                 message="此邮箱已被注册",
-                error_code=ErrorCode.RESOURCE_CONFLICT,
+                error_code=ErrorCode.CONFLICT,
                 status_code=status.HTTP_409_CONFLICT,
                 request_id=request_id
             )
@@ -134,7 +134,7 @@ async def login(
         request_id: 请求ID
     
     Returns:
-        JSONResponse: 包含用户信息和JWT令牌的响应
+        CustomJSONResponse: 包含用户信息和JWT令牌的响应
     """
     logger.info(f"处理用户登录请求: {login_data.email} - 请求ID: {request_id}")
     
@@ -147,6 +147,19 @@ async def login(
                 message="邮箱或密码不正确",
                 error_code=ErrorCode.UNAUTHORIZED,
                 status_code=status.HTTP_401_UNAUTHORIZED,
+                request_id=request_id
+            )
+        
+        # 调试日志：检查用户数据
+        logger.debug(f"从数据库获取的用户数据: {user} - 请求ID: {request_id}")
+        
+        # 检查必要字段是否存在
+        if "password_hash" not in user or not user["password_hash"]:
+            logger.error(f"用户数据缺少password_hash字段: {login_data.email} - 请求ID: {request_id}")
+            return ApiResponse.error(
+                message="登录过程中发生错误",
+                error_code=ErrorCode.SERVER_ERROR,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 request_id=request_id
             )
         
@@ -206,7 +219,7 @@ async def login(
     }
 )
 async def get_current_user_info(
-    current_user: Annotated[Dict[str, Any], Depends(AuthMiddleware.get_current_user)],
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
     request_id: str = Depends(get_request_id)
 ):
     """
@@ -217,7 +230,7 @@ async def get_current_user_info(
         request_id: 请求ID
     
     Returns:
-        JSONResponse: 包含用户详细信息的响应
+        CustomJSONResponse: 包含用户详细信息的响应
     """
     logger.info(f"获取当前用户信息: {current_user.get('email')} - 请求ID: {request_id}")
     

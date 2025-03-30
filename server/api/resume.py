@@ -11,11 +11,11 @@ import logging
 from datetime import datetime
 from bson import ObjectId
 
-from models.database import get_mongo_db
-from middleware.auth import AuthMiddleware
-from utils.response import ApiResponse, ResponseModel, PaginatedResponseModel
-from models.resume import ResumeModel, ResumeCreate, ResumeUpdate, ResumeResponse
-from utils.request_id import get_request_id
+from server.models.database import get_mongo_db
+from server.middleware.auth import AuthMiddleware, get_current_user
+from server.utils.response import ApiResponse, ResponseModel, PaginatedResponseModel
+from server.models.resume import ResumeModel, ResumeCreate, ResumeUpdate, ResumeResponse
+from server.utils.request_id import get_request_id
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ def allowed_file(filename: str) -> bool:
 async def upload_resume(
     resume_file: Annotated[UploadFile, File(...)],
     title: Annotated[str, Form(...)],
-    current_user: Annotated[Dict[str, Any], Depends(AuthMiddleware.get_current_user)],
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
     db: Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)],
     request_id: str = Depends(get_request_id),
     description: Annotated[Optional[str], Form()] = None
@@ -73,7 +73,7 @@ async def upload_resume(
         request_id: 请求ID
     
     Returns:
-        JSONResponse: 上传的简历信息
+        CustomJSONResponse: 上传的简历信息
     """
     logger.info(f"处理简历上传请求: {resume_file.filename} - 用户: {current_user.get('email')} - 请求ID: {request_id}")
     
@@ -163,7 +163,7 @@ async def upload_resume(
     }
 )
 async def get_resumes(
-    current_user: Annotated[Dict[str, Any], Depends(AuthMiddleware.get_current_user)],
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
     db: Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)],
     request_id: str = Depends(get_request_id),
     page: Annotated[int, Query(ge=1, description="页码")] = 1,
@@ -180,7 +180,7 @@ async def get_resumes(
         request_id: 请求ID
     
     Returns:
-        JSONResponse: 简历列表和分页信息
+        CustomJSONResponse: 简历列表和分页信息
     """
     logger.info(f"获取简历列表: 用户: {current_user.get('email')} - 页码: {page}, 每页: {limit} - 请求ID: {request_id}")
     
@@ -231,7 +231,7 @@ async def get_resumes(
 )
 async def get_resume(
     resume_id: Annotated[str, Path(..., description="简历ID")],
-    current_user: Annotated[Dict[str, Any], Depends(AuthMiddleware.get_current_user)],
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
     db: Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)],
     request_id: str = Depends(get_request_id)
 ):
@@ -245,7 +245,7 @@ async def get_resume(
         request_id: 请求ID
     
     Returns:
-        JSONResponse: 简历详情
+        CustomJSONResponse: 简历详情
     """
     logger.info(f"获取简历详情: ID: {resume_id} - 用户: {current_user.get('email')} - 请求ID: {request_id}")
     
@@ -296,7 +296,7 @@ async def get_resume(
 )
 async def download_resume(
     resume_id: Annotated[str, Path(..., description="简历ID")],
-    current_user: Annotated[Dict[str, Any], Depends(AuthMiddleware.get_current_user)],
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
     db: Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)],
     request_id: str = Depends(get_request_id)
 ):
@@ -385,7 +385,7 @@ async def download_resume(
 async def update_resume(
     resume_id: Annotated[str, Path(..., description="简历ID")],
     resume_data: Annotated[ResumeUpdate, Body(...)],
-    current_user: Annotated[Dict[str, Any], Depends(AuthMiddleware.get_current_user)],
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
     db: Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)],
     request_id: str = Depends(get_request_id)
 ):
@@ -400,7 +400,7 @@ async def update_resume(
         request_id: 请求ID
     
     Returns:
-        JSONResponse: 更新后的简历信息
+        CustomJSONResponse: 更新后的简历信息
     """
     logger.info(f"更新简历: ID: {resume_id} - 用户: {current_user.get('email')} - 请求ID: {request_id}")
     
@@ -471,7 +471,7 @@ async def update_resume(
 )
 async def delete_resume(
     resume_id: Annotated[str, Path(..., description="简历ID")],
-    current_user: Annotated[Dict[str, Any], Depends(AuthMiddleware.get_current_user)],
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
     db: Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)],
     request_id: str = Depends(get_request_id)
 ):

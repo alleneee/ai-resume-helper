@@ -19,13 +19,14 @@ const Register: React.FC = () => {
 
             const responseData = response as unknown as ApiResponse<any>;
 
-            if (responseData?.status === 'success') {
+            if (responseData?.success === true) {
                 message.success('注册成功，请登录');
                 navigate('/login');
             } else {
                 message.error(responseData?.message || '注册失败，请稍后再试');
             }
         } catch (error: any) {
+            console.error('注册错误:', error);
             message.error(error.response?.data?.message || '注册失败，请稍后再试');
         } finally {
             setLoading(false);
@@ -54,7 +55,7 @@ const Register: React.FC = () => {
                         <Input
                             prefix={<User className="text-gray-400 mr-2" size={16} />}
                             placeholder="请输入姓名"
-                            className="bg-white/5 border-gray-700 text-white"
+                            className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
                         />
                     </Form.Item>
 
@@ -69,7 +70,7 @@ const Register: React.FC = () => {
                         <Input
                             prefix={<Mail className="text-gray-400 mr-2" size={16} />}
                             placeholder="请输入邮箱"
-                            className="bg-white/5 border-gray-700 text-white"
+                            className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
                         />
                     </Form.Item>
 
@@ -84,7 +85,7 @@ const Register: React.FC = () => {
                         <Input.Password
                             prefix={<LockKeyhole className="text-gray-400 mr-2" size={16} />}
                             placeholder="请输入密码"
-                            className="bg-white/5 border-gray-700 text-white"
+                            className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
                         />
                     </Form.Item>
 
@@ -107,7 +108,7 @@ const Register: React.FC = () => {
                         <Input.Password
                             prefix={<LockKeyhole className="text-gray-400 mr-2" size={16} />}
                             placeholder="请确认密码"
-                            className="bg-white/5 border-gray-700 text-white"
+                            className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
                         />
                     </Form.Item>
 

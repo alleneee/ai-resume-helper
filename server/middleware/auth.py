@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from config.settings import get_settings
-from models.database import get_mongo_db
+from server.config.settings import get_settings
+from server.models.database import get_mongo_db
 
 security = HTTPBearer()
 
@@ -31,19 +31,27 @@ class AuthMiddleware:
             JWT令牌字符串
         """
         jwt_secret = get_settings().SECRET_KEY
-        # 解析JWT过期时间字符串（例如："7d"）
+        # 获取JWT过期时间（秒）
         expires_in = get_settings().JWT_EXPIRES_IN
         
-        # 处理过期时间格式
-        if expires_in.endswith('d'):
-            expires_delta = timedelta(days=int(expires_in[:-1]))
-        elif expires_in.endswith('h'):
-            expires_delta = timedelta(hours=int(expires_in[:-1]))
-        elif expires_in.endswith('m'):
-            expires_delta = timedelta(minutes=int(expires_in[:-1]))
+        # 处理过期时间
+        if isinstance(expires_in, int):
+            # 如果是整数，直接转换为秒的timedelta
+            expires_delta = timedelta(seconds=expires_in)
+        elif isinstance(expires_in, str):
+            # 兼容字符串格式（例如："7d"）
+            if expires_in.endswith('d'):
+                expires_delta = timedelta(days=int(expires_in[:-1]))
+            elif expires_in.endswith('h'):
+                expires_delta = timedelta(hours=int(expires_in[:-1]))
+            elif expires_in.endswith('m'):
+                expires_delta = timedelta(minutes=int(expires_in[:-1]))
+            else:
+                # 默认为7天
+                expires_delta = timedelta(days=7)
         else:
-            # 默认为7天
-            expires_delta = timedelta(days=7)
+            # 默认为1小时
+            expires_delta = timedelta(hours=1)
         
         payload = {
             'sub': str(user_data['_id']),
@@ -56,12 +64,12 @@ class AuthMiddleware:
         return jwt.encode(payload, jwt_secret, algorithm='HS256')
     
     @staticmethod
-    async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
+    def verify_jwt_token(token: str) -> Dict[str, Any]:
         """
         验证JWT令牌
         
         Args:
-            credentials: HTTP授权凭证
+            token: JWT令牌字符串
             
         Returns:
             解码后的JWT负载
@@ -69,7 +77,6 @@ class AuthMiddleware:
         Raises:
             HTTPException: 如果令牌无效或已过期
         """
-        token = credentials.credentials
         jwt_secret = get_settings().SECRET_KEY
         
         try:
@@ -81,15 +88,15 @@ class AuthMiddleware:
             raise HTTPException(status_code=401, detail='无效的令牌')
     
     @staticmethod
-    async def get_current_user(
-        payload: Dict[str, Any] = Depends(verify_token),
-        db: AsyncIOMotorDatabase = Depends(get_mongo_db)
+    async def get_user_by_id(
+        user_id: str,
+        db: AsyncIOMotorDatabase
     ) -> Dict[str, Any]:
         """
-        获取当前用户
+        通过用户ID获取用户
         
         Args:
-            payload: JWT负载
+            user_id: 用户ID
             db: MongoDB数据库连接
             
         Returns:
@@ -98,7 +105,6 @@ class AuthMiddleware:
         Raises:
             HTTPException: 如果用户不存在
         """
-        user_id = payload['sub']
         user = await db.users.find_one({'_id': user_id})
         
         if user is None:
@@ -109,6 +115,36 @@ class AuthMiddleware:
 
 
 auth_middleware = AuthMiddleware()
+
+async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
+    """
+    验证JWT令牌 (独立的依赖函数)
+    
+    Args:
+        credentials: HTTP授权凭证
+        
+    Returns:
+        解码后的JWT负载
+    """
+    token = credentials.credentials
+    return auth_middleware.verify_jwt_token(token)
+
+async def get_current_user(
+    payload: Dict[str, Any] = Depends(verify_token),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db)
+) -> Dict[str, Any]:
+    """
+    获取当前用户 (独立的依赖函数)
+    
+    Args:
+        payload: JWT负载
+        db: MongoDB数据库连接
+        
+    Returns:
+        用户对象
+    """
+    user_id = payload['sub']
+    return await auth_middleware.get_user_by_id(user_id, db)
 
 def get_current_user_with_permissions(required_permissions: List[str] = None):
     """
@@ -124,7 +160,7 @@ def get_current_user_with_permissions(required_permissions: List[str] = None):
         HTTPException: 如果用户不存在或没有所需权限
     """
     async def _get_user_with_permissions(
-        payload: Dict[str, Any] = Depends(AuthMiddleware.verify_token),
+        payload: Dict[str, Any] = Depends(verify_token),
         db: AsyncIOMotorDatabase = Depends(get_mongo_db)
     ) -> Dict[str, Any]:
         user_id = payload['sub']

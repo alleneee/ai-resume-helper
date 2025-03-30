@@ -4,6 +4,7 @@
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Query, Path, Request
 from fastapi.responses import JSONResponse
+from server.utils.response import CustomJSONResponse
 from pydantic import BaseModel, Field, ValidationError
 from typing import Dict, Any, List, Optional, Annotated, Union
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -12,9 +13,9 @@ import logging
 from bson import ObjectId
 import uuid
 
-from models.database import get_mongo_db
-from middleware.auth import AuthMiddleware, get_current_user_with_permissions
-from utils.response import (
+from server.models.database import get_mongo_db
+from server.middleware.auth import AuthMiddleware, get_current_user_with_permissions, get_current_user, verify_token
+from server.utils.response import (
     ApiResponse, 
     ResponseModel, 
     PaginatedResponseModel,
@@ -22,8 +23,8 @@ from utils.response import (
     ErrorCode,
     create_http_exception
 )
-from utils.request_id import get_request_id
-from models.agent import (
+from server.utils.request_id import get_request_id
+from server.models.agent import (
     ResumeOptimizationRequest, 
     JobMatchRequest, 
     CoverLetterRequest,
@@ -34,8 +35,8 @@ from models.agent import (
 )
 
 # 导入智能代理服务
-from services.agents.resume_agent import optimize_resume as agent_optimize_resume, analyze_resume as agent_analyze_resume
-from services.agents.job_agent import search_jobs as agent_search_jobs, match_job as agent_match_job
+from server.services.agents.resume_agent import optimize_resume as agent_optimize_resume, analyze_resume as agent_analyze_resume
+from server.services.agents.job_agent import search_jobs as agent_search_jobs, match_job as agent_match_job
 # TODO: 待实现求职信生成功能
 # from services.agents.cover_letter_agent import generate_cover_letter as agent_generate_cover_letter
 
@@ -135,7 +136,7 @@ async def optimize_resume(
         request_id: 请求ID
     
     Returns:
-        JSONResponse: 优化后的简历内容和建议
+        CustomJSONResponse: 优化后的简历内容和建议
     """
     logger.info(f"处理简历优化请求 - 用户:{current_user.get('email')} - 简历ID:{request.resume_id} - 请求ID:{request_id}")
     
@@ -225,7 +226,7 @@ async def match_jobs(
         request_id: 请求ID
     
     Returns:
-        JSONResponse: 匹配职位列表和匹配度分析
+        CustomJSONResponse: 匹配职位列表和匹配度分析
     """
     logger.info(f"处理职位匹配请求 - 用户:{current_user.get('email')} - 简历ID:{request.resume_id} - 请求ID:{request_id}")
     
@@ -333,7 +334,7 @@ async def generate_cover_letter(
         request_id: 请求ID
     
     Returns:
-        JSONResponse: 生成的求职信内容
+        CustomJSONResponse: 生成的求职信内容
     """
     logger.info(f"处理求职信生成请求 - 用户:{current_user.get('email')} - 简历ID:{request.resume_id} - 公司:{request.company_name} - 请求ID:{request_id}")
     
@@ -440,7 +441,7 @@ async def search_jobs(
         request_id: 请求ID
     
     Returns:
-        JSONResponse: 职位搜索结果
+        CustomJSONResponse: 职位搜索结果
     """
     logger.info(f"处理职位搜索请求 - 用户:{current_user.get('email')} - 关键词:{request.keywords} - 地点:{request.location} - 请求ID:{request_id}")
     
@@ -534,7 +535,7 @@ async def analyze_resume(
         request_id: 请求ID
     
     Returns:
-        JSONResponse: 简历分析结果
+        CustomJSONResponse: 简历分析结果
     """
     logger.info(f"处理简历分析请求 - 用户:{current_user.get('email')} - 简历ID:{resume_id} - 请求ID:{request_id}")
     

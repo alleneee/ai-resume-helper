@@ -44,7 +44,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
         const response = await authApi.getCurrentUser();
         const responseData = response as unknown as ApiResponse<any>;
 
-        if (responseData?.status === 'success') {
+        if (responseData?.success === true) {
           setIsAuthenticated(true);
         } else {
           localStorage.removeItem('token');
@@ -136,7 +136,7 @@ const MainApp = () => {
         // 类型断言帮助TypeScript理解数据结构
         const responseData = response as unknown as ApiResponse<ResumeData>;
 
-        if (responseData?.status === 'success') {
+        if (responseData?.success === true) {
           setResumeId(responseData.data._id);
           onSuccess?.(response);
           message.success(`${uploadFile.name} 上传成功`);
