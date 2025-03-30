@@ -45,11 +45,6 @@ from ..models import JobSearchCriteria, JobPosting, JobPostingList # Changed to 
 # 配置日志
 logger = logging.getLogger(__name__)
 
-# --- 浏览器搜索工具实现 ---
-
-# --- _extract_json_string_from_result 函数已被删除 ---
-
-
 @function_tool
 async def run_browser_job_search(
     run_context: RunContextWrapper,  # 移到第一个位置

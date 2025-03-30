@@ -64,8 +64,7 @@ try:
         name="JobScraperAgent",
         instructions=scraper_instructions,
         tools=scraper_tools,
-        # 指定期望的最终输出类型为列表
-        output_type=List[JobPosting] 
+        output_type=List[JobPosting]
     )
     logger.info("ScraperAgent 定义完成 (使用 run_browser_job_search 工具，期望 List[JobPosting] 输出)")
 except Exception as e:
