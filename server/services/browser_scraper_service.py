@@ -1,7 +1,7 @@
 from typing import Optional, Dict, Any
 from browser_use import Agent as BrowserAgent, ActionResult, Controller
 from browser_use.browser.browser import Browser, BrowserConfig
-from config.settings import Settings, get_settings
+from server.config.settings import Settings, get_settings
 import logging
 
 logger = logging.getLogger(__name__)

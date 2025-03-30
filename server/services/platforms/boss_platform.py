@@ -7,8 +7,8 @@ import json
 from typing import Dict, Any, List, Optional
 from urllib.parse import quote
 
-from services.platforms.base_platform import BasePlatform
-from services.browser_scraper_service import BrowserScraperService
+from server.services.platforms.base_platform import BasePlatform
+from server.services.browser_scraper_service import BrowserScraperService
 
 logger = logging.getLogger(__name__)
 

@@ -2,9 +2,9 @@
 API路由入口模块
 """
 from fastapi import APIRouter
-from api.auth import router as auth_router
-from api.agent import router as agent_router
-from api.resume import router as resume_router
+from server.api.auth import router as auth_router
+from server.api.agent import router as agent_router
+from server.api.resume import router as resume_router
 
 def get_api_router():
     """

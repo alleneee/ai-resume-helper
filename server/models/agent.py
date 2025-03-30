@@ -162,8 +162,8 @@ class BaseAPIModel(BaseModel, Generic[T]):
     所有API模型的基类，提供通用配置和方法
     """
     # 类变量，用于动态文档生成
-    title: ClassVar[str] = "基础API模型"
-    description: ClassVar[str] = "所有API模型的基类"
+    schema_title: ClassVar[str] = "基础API模型"
+    schema_description: ClassVar[str] = "所有API模型的基类"
     
     model_config = ConfigDict(
         populate_by_name=True,
@@ -185,12 +185,12 @@ class BaseAPIModel(BaseModel, Generic[T]):
     @classmethod
     def get_schema_title(cls) -> str:
         """获取模型文档标题"""
-        return getattr(cls, 'title', cls.__name__)
+        return getattr(cls, 'schema_title', cls.__name__)
     
     @classmethod
     def get_schema_description(cls) -> str:
         """获取模型文档描述"""
-        return getattr(cls, 'description', cls.__doc__ or "")
+        return getattr(cls, 'schema_description', cls.__doc__ or "")
 
 class ResumeOptimizationRequest(BaseAPIModel):
     """简历优化请求模型"""
@@ -502,8 +502,8 @@ class ResumeOptimizationResult(BaseAPIModel):
 
 class JobItem(BaseAPIModel):
     """职位项模型"""
-    title: ClassVar[str] = "职位项"
-    description: ClassVar[str] = "表示单个职位信息的详细数据模型"
+    schema_title: ClassVar[str] = "职位项"
+    schema_description: ClassVar[str] = "表示单个职位信息的详细数据模型"
     
     id: str = Field(..., description="职位ID")
     title: str = Field(..., description="职位标题")
@@ -971,8 +971,8 @@ JobSearchResponse = JobSearchResult
 
 class JobDetail(BaseAPIModel):
     """职位详情模型"""
-    title: ClassVar[str] = "职位详情"
-    description: ClassVar[str] = "表示单个职位的详细信息模型"
+    schema_title: ClassVar[str] = "职位详情"
+    schema_description: ClassVar[str] = "表示单个职位的详细信息模型"
     
     id: str = Field(..., description="职位ID")
     title: Optional[str] = Field(None, description="职位标题")

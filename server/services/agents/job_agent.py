@@ -9,7 +9,7 @@ import logging
 import asyncio
 from typing import Dict, Any, List, Optional, Union, TypedDict
 from datetime import datetime
-from database.mongodb import get_db
+from server.database.mongodb import get_db
 from pydantic import BaseModel, Field
 from openai.types.beta.threads import Run
 
@@ -19,13 +19,15 @@ from agents import GuardrailFunctionOutput, input_guardrail, output_guardrail
 
 # 导入browser-use相关模块
 from browser_use import Agent as BrowserAgent
+# from browser_use.plugin import Plugin, action # Temporarily commented out due to ImportError
 from browser_use.browser.browser import Browser, BrowserConfig
 from browser_use.controller.service import Controller
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-from models.agent import (
+# 导入server相关模块
+from server.models.agent import (
     JobSearchRequest, 
     JobSearchResponse,
     JobMatchRequest, 

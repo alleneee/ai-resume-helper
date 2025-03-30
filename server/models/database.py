@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from pymongo import MongoClient
-from config.settings import get_settings
+from server.config.settings import get_settings
 
 # 配置日志
 logger = logging.getLogger(__name__)

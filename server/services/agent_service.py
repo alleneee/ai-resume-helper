@@ -17,13 +17,13 @@ from bs4 import BeautifulSoup
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from firecrawl import FirecrawlApp
 from dotenv import load_dotenv
-from config.settings import Settings, get_settings
+from server.config.settings import Settings, get_settings
 from langchain_openai import ChatOpenAI
 from browser_use import Agent as BrowserAgent, ActionResult, Controller
 from browser_use.browser.browser import Browser, BrowserConfig
 from pydantic import BaseModel, Field, HttpUrl
-from services.browser_scraper_service import BrowserScraperService
-from services.platforms.platform_factory import PlatformFactory
+from server.services.browser_scraper_service import BrowserScraperService
+from server.services.platforms.platform_factory import PlatformFactory
 
 # 加载环境变量
 load_dotenv()

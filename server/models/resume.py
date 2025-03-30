@@ -7,18 +7,26 @@ from datetime import datetime
 from bson import ObjectId
 
 class PyObjectId(str):
-    """用于处理MongoDB ObjectId的自定义类型"""
+    """用于处理MongoDB ObjectId的自定义类型 (Pydantic v2兼容)"""
     
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
-    
-    @classmethod
-    def validate(cls, v):
+    def validate(cls, v, info):
+        """验证ObjectId并转换为字符串"""
         if not ObjectId.is_valid(v):
             if not isinstance(v, ObjectId):
                 raise ValueError("无效的ObjectId")
         return str(v)
+    
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type, handler):
+        """为Pydantic v2提供核心模式"""
+        from pydantic_core import core_schema
+        return core_schema.str_schema()
+    
+    @classmethod
+    def __get_pydantic_json_schema__(cls, schema, field_schema):
+        """为JSON模式提供类型信息"""
+        field_schema.update(type="string")
 
 class ResumeBase(BaseModel):
     """简历基础模型"""

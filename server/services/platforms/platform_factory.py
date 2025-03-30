@@ -4,8 +4,8 @@
 import logging
 from typing import Dict, Type, List, Optional, Any
 
-from services.platforms.base_platform import BasePlatform
-from services.platforms.boss_platform import BossPlatform
+from server.services.platforms.base_platform import BasePlatform
+from server.services.platforms.boss_platform import BossPlatform
 
 logger = logging.getLogger(__name__)
 

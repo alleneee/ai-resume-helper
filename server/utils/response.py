@@ -13,6 +13,29 @@ import logging
 from datetime import datetime
 import os
 
+# 自定义JSON编码器，处理datetime等特殊类型
+class CustomJSONEncoder(json.JSONEncoder):
+    """自定义JSON编码器，支持datetime等特殊类型的序列化"""
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        elif hasattr(obj, "dict") and callable(getattr(obj, "dict")):
+            return obj.dict()
+        return super().default(obj)
+
+# 自定义JSONResponse，使用自定义编码器
+class CustomJSONResponse(JSONResponse):
+    """自定义JSONResponse，使用CustomJSONEncoder处理特殊类型"""
+    def render(self, content: Any) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":"),
+            cls=CustomJSONEncoder,
+        ).encode("utf-8")
+
 # 配置日志
 logger = logging.getLogger(__name__)
 
@@ -414,7 +437,7 @@ class ApiResponse:
         data: Any = None, 
         status_code: int = status.HTTP_200_OK,
         request_id: Optional[str] = None
-    ) -> JSONResponse:
+    ) -> CustomJSONResponse:
         """
         成功响应
         
@@ -425,9 +448,9 @@ class ApiResponse:
             request_id: 请求ID，用于追踪
             
         Returns:
-            JSONResponse: 包含ResponseModel的JSON响应
+            CustomJSONResponse: 包含ResponseModel的JSON响应
         """
-        return JSONResponse(
+        return CustomJSONResponse(
             status_code=status_code,
             content=ResponseModel.success_response(
                 data=data, 
@@ -444,7 +467,7 @@ class ApiResponse:
         limit: int,
         message: str = "获取数据成功",
         request_id: Optional[str] = None
-    ) -> JSONResponse:
+    ) -> CustomJSONResponse:
         """
         分页响应
         
@@ -457,9 +480,9 @@ class ApiResponse:
             request_id: 请求ID，用于追踪
             
         Returns:
-            JSONResponse: 包含PaginatedResponseModel的JSON响应
+            CustomJSONResponse: 包含PaginatedResponseModel的JSON响应
         """
-        return JSONResponse(
+        return CustomJSONResponse(
             content=PaginatedResponseModel.create(
                 items=items, 
                 page=page, 
@@ -478,7 +501,7 @@ class ApiResponse:
         status_code: int = status.HTTP_400_BAD_REQUEST,
         request_id: Optional[str] = None,
         log_error: bool = True
-    ) -> JSONResponse:
+    ) -> CustomJSONResponse:
         """
         错误响应
         
@@ -491,7 +514,7 @@ class ApiResponse:
             log_error: 是否记录错误日志
             
         Returns:
-            JSONResponse: 包含ErrorResponseModel的JSON响应
+            CustomJSONResponse: 包含ErrorResponseModel的JSON响应
         """
         # 创建错误响应
         error_response = ErrorResponseModel.create(
@@ -517,7 +540,7 @@ class ApiResponse:
             
             logger.error(log_message)
         
-        return JSONResponse(
+        return CustomJSONResponse(
             status_code=status_code,
             content=error_response.dict()
         )
@@ -527,17 +550,17 @@ class ApiResponse:
         message: str = "数据验证失败",
         errors: Optional[List[Dict[str, Any]]] = None,
         request_id: Optional[str] = None
-    ) -> JSONResponse:
+    ) -> CustomJSONResponse:
         """
         验证错误响应
         
         Args:
             message: 错误消息
             errors: 验证错误列表
-            request_id: 请求ID，用于追踪
+            request_id: 请求ID，用于迟踪
             
         Returns:
-            JSONResponse: 包含验证错误的JSON响应
+            CustomJSONResponse: 包含验证错误的JSON响应
         """
         return ApiResponse.error(
             message=message,
@@ -552,7 +575,7 @@ class ApiResponse:
         message: str = "资源不存在",
         resource: Optional[str] = None,
         request_id: Optional[str] = None
-    ) -> JSONResponse:
+    ) -> CustomJSONResponse:
         """
         资源不存在响应
         
@@ -562,7 +585,7 @@ class ApiResponse:
             request_id: 请求ID，用于追踪
             
         Returns:
-            JSONResponse: 包含404错误的JSON响应
+            CustomJSONResponse: 包含404错误的JSON响应
         """
         if resource and "不存在" not in message:
             message = f"{resource}不存在"
@@ -578,7 +601,7 @@ class ApiResponse:
     def unauthorized(
         message: str = "未授权访问",
         request_id: Optional[str] = None
-    ) -> JSONResponse:
+    ) -> CustomJSONResponse:
         """
         未授权响应
         
@@ -587,7 +610,7 @@ class ApiResponse:
             request_id: 请求ID，用于追踪
             
         Returns:
-            JSONResponse: 包含401错误的JSON响应
+            CustomJSONResponse: 包含401错误的JSON响应
         """
         return ApiResponse.error(
             message=message,
@@ -600,7 +623,7 @@ class ApiResponse:
     def forbidden(
         message: str = "禁止访问",
         request_id: Optional[str] = None
-    ) -> JSONResponse:
+    ) -> CustomJSONResponse:
         """
         禁止访问响应
         
@@ -609,7 +632,7 @@ class ApiResponse:
             request_id: 请求ID，用于追踪
             
         Returns:
-            JSONResponse: 包含403错误的JSON响应
+            CustomJSONResponse: 包含403错误的JSON响应
         """
         return ApiResponse.error(
             message=message,
@@ -623,7 +646,7 @@ class ApiResponse:
         message: str = "服务器内部错误",
         exc: Optional[Exception] = None,
         request_id: Optional[str] = None
-    ) -> JSONResponse:
+    ) -> CustomJSONResponse:
         """
         服务器错误响应
         
@@ -633,7 +656,7 @@ class ApiResponse:
             request_id: 请求ID，用于追踪
             
         Returns:
-            JSONResponse: 包含500错误的JSON响应
+            CustomJSONResponse: 包含500错误的JSON响应
         """
         if exc:
             logger.exception(f"服务器错误: {message}", exc_info=exc)
@@ -650,7 +673,7 @@ class ApiResponse:
         message: str = "资源冲突",
         errors: Optional[List[Dict[str, Any]]] = None,
         request_id: Optional[str] = None
-    ) -> JSONResponse:
+    ) -> CustomJSONResponse:
         """
         资源冲突响应
         
@@ -660,7 +683,7 @@ class ApiResponse:
             request_id: 请求ID，用于追踪
             
         Returns:
-            JSONResponse: 包含409错误的JSON响应
+            CustomJSONResponse: 包含409错误的JSON响应
         """
         return ApiResponse.error(
             message=message,
@@ -675,7 +698,7 @@ class ApiResponse:
         message: str = "请求过于频繁",
         retry_after: Optional[int] = None,
         request_id: Optional[str] = None
-    ) -> JSONResponse:
+    ) -> CustomJSONResponse:
         """
         请求频率限制响应
         
@@ -685,7 +708,7 @@ class ApiResponse:
             request_id: 请求ID，用于追踪
             
         Returns:
-            JSONResponse: 包含429错误的JSON响应
+            CustomJSONResponse: 包含429错误的JSON响应
         """
         response = ApiResponse.error(
             message=message,
@@ -704,7 +727,7 @@ class ApiResponse:
         message: str,
         errors: Optional[List[Dict[str, Any]]] = None,
         request_id: Optional[str] = None
-    ) -> JSONResponse:
+    ) -> CustomJSONResponse:
         """
         业务逻辑错误响应
         
@@ -714,7 +737,7 @@ class ApiResponse:
             request_id: 请求ID，用于追踪
             
         Returns:
-            JSONResponse: 包含业务错误的JSON响应
+            CustomJSONResponse: 包含业务错误的JSON响应
         """
         return ApiResponse.error(
             message=message,
@@ -729,7 +752,7 @@ class ApiResponse:
         message: str = "AI服务调用失败",
         errors: Optional[List[Dict[str, Any]]] = None,
         request_id: Optional[str] = None
-    ) -> JSONResponse:
+    ) -> CustomJSONResponse:
         """
         AI服务错误响应
         
@@ -739,7 +762,7 @@ class ApiResponse:
             request_id: 请求ID，用于追踪
             
         Returns:
-            JSONResponse: 包含AI服务错误的JSON响应
+            CustomJSONResponse: 包含AI服务错误的JSON响应
         """
         return ApiResponse.error(
             message=message,
@@ -755,7 +778,7 @@ class HttpExceptionHandler:
     """HTTP异常处理工具类"""
     
     @staticmethod
-    async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    async def http_exception_handler(request: Request, exc: HTTPException) -> CustomJSONResponse:
         """
         处理HTTP异常
         
@@ -764,7 +787,7 @@ class HttpExceptionHandler:
             exc: HTTP异常
             
         Returns:
-            JSONResponse: 格式化的错误响应
+            CustomJSONResponse: 格式化的错误响应
         """
         # 获取请求ID
         request_id = request.headers.get("X-Request-ID")
@@ -794,7 +817,7 @@ class HttpExceptionHandler:
         )
     
     @staticmethod
-    async def validation_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    async def validation_exception_handler(request: Request, exc: Exception) -> CustomJSONResponse:
         """
         处理Pydantic验证异常
         
@@ -803,7 +826,7 @@ class HttpExceptionHandler:
             exc: 验证异常
             
         Returns:
-            JSONResponse: 格式化的错误响应
+            CustomJSONResponse: 格式化的错误响应
         """
         # 获取请求ID
         request_id = request.headers.get("X-Request-ID")
@@ -836,7 +859,7 @@ class HttpExceptionHandler:
         )
     
     @staticmethod
-    async def internal_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    async def internal_exception_handler(request: Request, exc: Exception) -> CustomJSONResponse:
         """
         处理未捕获的异常
         
@@ -845,7 +868,7 @@ class HttpExceptionHandler:
             exc: 异常
             
         Returns:
-            JSONResponse: 格式化的错误响应
+            CustomJSONResponse: 格式化的错误响应
         """
         # 获取请求ID
         request_id = request.headers.get("X-Request-ID")

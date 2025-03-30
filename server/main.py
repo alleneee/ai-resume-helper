@@ -13,9 +13,9 @@ import uvicorn
 from typing import Dict, Any, List
 
 # 导入API路由
-from api import auth, resume, agent, agent_v2
-from models.database import close_mongo_connection, connect_to_mongo
-from utils.response import ApiResponse
+from server.api import auth, resume, agent, agent_v2
+from server.models.database import close_mongo_connection, connect_to_mongo
+from server.utils.response import ApiResponse, CustomJSONResponse, HttpExceptionHandler
 
 # 配置日志
 logging.basicConfig(
@@ -82,33 +82,14 @@ app.add_middleware(
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """处理请求验证错误"""
-    errors = []
-    for error in exc.errors():
-        errors.append({
-            "loc": error["loc"],
-            "msg": error["msg"],
-            "type": error["type"]
-        })
-    
-    logger.warning(f"请求验证错误: {errors}")
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content=ApiResponse.validation_error(
-            message="请求参数验证失败",
-            data={"errors": errors}
-        ).dict()
-    )
+    # 使用HttpExceptionHandler中的方法处理验证错误，确保一致的错误处理
+    return await HttpExceptionHandler.validation_exception_handler(request, exc)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """处理全局异常"""
-    logger.error(f"全局异常: {str(exc)}", exc_info=True)
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content=ApiResponse.error(
-            message=f"服务器内部错误: {str(exc)}"
-        ).dict()
-    )
+    # 使用HttpExceptionHandler中的方法处理全局异常，确保一致的错误处理
+    return await HttpExceptionHandler.internal_exception_handler(request, exc)
 
 # 注册路由
 app.include_router(auth.router, prefix="/api")
@@ -128,7 +109,7 @@ async def health_check():
 # 主入口
 if __name__ == "__main__":
     uvicorn.run(
-        "main:app",
+        "server.main:app",
         host="0.0.0.0",
         port=8000,
         reload=True,

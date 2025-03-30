@@ -12,8 +12,8 @@ from agents.run import RunResult
 from agents.model_settings import ModelSettings
 from agents import GuardrailFunctionOutput, input_guardrail, output_guardrail
 
-from models.agent import ResumeOptimizationResult, ResumeOptimizationRequest
-from utils.response import ErrorCode
+from server.models.agent import ResumeOptimizationResult, ResumeOptimizationRequest
+from server.utils.response import ErrorCode
 
 # 导入 LangChain 相关库
 from langchain_openai import ChatOpenAI

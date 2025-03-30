@@ -10,23 +10,28 @@ import bcrypt
 from sqlalchemy import Column, String, DateTime, JSON, Boolean, Integer, Enum as SQLAEnum
 from sqlalchemy.dialects.postgresql import JSONB
 
-from models.database import Base
+from server.models.database import Base
 
 # Pydantic模型 - 用于API交互
 class PyObjectId(str):
-    """自定义ObjectId字段，支持序列化和验证"""
+    """自定义ObjectId字段，支持序列化和验证 (Pydantic v2兼容)"""
+    
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
-
-    @classmethod
-    def validate(cls, v):
+    def validate(cls, v, info):
+        """Pydantic v2验证方法"""
         if not ObjectId.is_valid(v):
             raise ValueError("无效的ObjectId")
         return str(ObjectId(v))
-
+    
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type, handler):
+        """为Pydantic v2提供核心模式"""
+        from pydantic_core import core_schema
+        return core_schema.str_schema()
+    
     @classmethod
     def __get_pydantic_json_schema__(cls, schema, field_schema):
+        """为JSON模式提供类型信息"""
         field_schema.update(type="string")
 
 # 用户角色枚举
@@ -97,7 +102,7 @@ class UserModel(BaseModel):
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
     email: EmailStr = Field(..., description="用户邮箱", index=True)
     phone_number: Optional[str] = Field(None, description="用户电话号码")
-    password_hash: str = Field(..., description="密码哈希值", exclude=True)
+    password_hash: str = Field(..., description="密码哈希值")
     full_name: str = Field(..., min_length=2, max_length=100, description="用户全名")
     subscription_tier: str = Field(default="free", description="订阅级别")
     preferences: UserPreferences = Field(default_factory=UserPreferences, description="用户偏好设置")
@@ -167,16 +172,19 @@ class UserCreate(BaseModel):
     email: EmailStr = Field(..., description="用户邮箱")
     phone_number: Optional[str] = Field(None, description="用户电话号码")
     password: str = Field(..., min_length=8, description="用户密码")
-    full_name: str = Field(..., min_length=2, max_length=100, description="用户全名")
+    full_name: str = Field(..., min_length=2, max_length=100, description="用户全名", validation_alias="name")
     
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "email": "user@example.com",
-            "phone_number": "13800138000",
-            "password": "securepassword123",
-            "full_name": "张三"
-        }
-    })
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "email": "user@example.com",
+                "phone_number": "13800138000",
+                "password": "securepassword123",
+                "full_name": "张三"
+            }
+        },
+        populate_by_name=True  # 允许通过字段名填充，支持别名
+    )
 
 # 用户登录请求模型
 class UserLogin(BaseModel):
